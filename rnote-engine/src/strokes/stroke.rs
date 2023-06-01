@@ -1,3 +1,13 @@
+// Imports
+use super::bitmapimage::BitmapImage;
+use super::brushstroke::BrushStroke;
+use super::shapestroke::ShapeStroke;
+use super::strokebehaviour::GeneratedStrokeImages;
+use super::vectorimage::VectorImage;
+use super::{StrokeBehaviour, TextStroke};
+use crate::store::chrono_comp::StrokeLayer;
+use crate::{render, RnoteEngine};
+use crate::{utils, DrawBehaviour};
 use base64::Engine;
 use p2d::bounding_volume::Aabb;
 use rnote_compose::helpers::AabbHelpers;
@@ -9,16 +19,6 @@ use rnote_compose::transform::TransformBehaviour;
 use rnote_compose::{Color, PenPath, Style};
 use rnote_fileformats::xoppformat::{self, XoppColor};
 use serde::{Deserialize, Serialize};
-
-use super::bitmapimage::BitmapImage;
-use super::brushstroke::BrushStroke;
-use super::shapestroke::ShapeStroke;
-use super::strokebehaviour::GeneratedStrokeImages;
-use super::vectorimage::VectorImage;
-use super::{StrokeBehaviour, TextStroke};
-use crate::store::chrono_comp::StrokeLayer;
-use crate::{render, RnoteEngine};
-use crate::{utils, DrawBehaviour};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "stroke")]
@@ -57,6 +57,30 @@ impl StrokeBehaviour for Stroke {
             Stroke::TextStroke(textstroke) => textstroke.gen_images(viewport, image_scale),
             Stroke::VectorImage(vectorimage) => vectorimage.gen_images(viewport, image_scale),
             Stroke::BitmapImage(bitmapimage) => bitmapimage.gen_images(viewport, image_scale),
+        }
+    }
+
+    fn draw_highlight(
+        &self,
+        cx: &mut impl piet::RenderContext,
+        total_zoom: f64,
+    ) -> anyhow::Result<()> {
+        match self {
+            Stroke::BrushStroke(brushstroke) => brushstroke.draw_highlight(cx, total_zoom),
+            Stroke::ShapeStroke(shapestroke) => shapestroke.draw_highlight(cx, total_zoom),
+            Stroke::TextStroke(textstroke) => textstroke.draw_highlight(cx, total_zoom),
+            Stroke::VectorImage(vectorimage) => vectorimage.draw_highlight(cx, total_zoom),
+            Stroke::BitmapImage(bitmapimage) => bitmapimage.draw_highlight(cx, total_zoom),
+        }
+    }
+
+    fn update_geometry(&mut self) {
+        match self {
+            Stroke::BrushStroke(brushstroke) => brushstroke.update_geometry(),
+            Stroke::ShapeStroke(shapestroke) => shapestroke.update_geometry(),
+            Stroke::TextStroke(textstroke) => textstroke.update_geometry(),
+            Stroke::VectorImage(vectorimage) => vectorimage.update_geometry(),
+            Stroke::BitmapImage(bitmapimage) => bitmapimage.update_geometry(),
         }
     }
 }
@@ -158,7 +182,7 @@ impl TransformBehaviour for Stroke {
 }
 
 impl Stroke {
-    /// The default offset in surface coords when importing a stroke
+    /// The default offset in surface coords when importing a stroke.
     pub const IMPORT_OFFSET_DEFAULT: na::Vector2<f64> = na::vector![32.0, 32.0];
 
     pub fn extract_default_layer(&self) -> StrokeLayer {
@@ -299,7 +323,7 @@ impl Stroke {
     pub fn into_xopp(self, current_dpi: f64) -> Option<xoppformat::XoppStrokeType> {
         match self {
             Stroke::BrushStroke(brushstroke) => {
-                let (width, color): (f64, XoppColor) = match brushstroke.style {
+                let (stroke_width, color): (f64, XoppColor) = match &brushstroke.style {
                     // Return early if color is None
                     Style::Smooth(options) => (
                         options.stroke_width,
@@ -317,21 +341,26 @@ impl Stroke {
 
                 let tool = xoppformat::XoppTool::Pen;
                 let elements_vec = brushstroke.path.into_elements();
-
-                // The first width element is the absolute width of the stroke
+                let stroke_style = &brushstroke.style;
                 let stroke_width =
-                    utils::convert_value_dpi(width, current_dpi, xoppformat::XoppFile::DPI);
+                    utils::convert_value_dpi(stroke_width, current_dpi, xoppformat::XoppFile::DPI);
 
+                // in Xopp's format the first width element is the absolute width of the stroke
                 let mut width_vec = vec![stroke_width];
 
                 // the rest are pressures between 0.0 and 1.0
-                let mut pressures = elements_vec
+                let mut pressures: Vec<f64> = elements_vec
                     .iter()
-                    .map(|element| stroke_width * element.pressure)
-                    .collect::<Vec<f64>>();
+                    .map(|element| match &stroke_style {
+                        Style::Smooth(options) => {
+                            options.pressure_curve.apply(stroke_width, element.pressure)
+                        }
+                        Style::Rough(_) | Style::Textured(_) => stroke_width * element.pressure,
+                    })
+                    .collect();
                 width_vec.append(&mut pressures);
 
-                // Xopp expects at least 4 coordinates, so stroke with elements < 2 is not exported
+                // Xopp expects at least 4 coordinates, so strokes with elements < 2 aren't exported
                 if elements_vec.len() < 2 {
                     return None;
                 }
@@ -399,32 +428,8 @@ impl Stroke {
                 ))
             }
             Stroke::TextStroke(textstroke) => {
-                // Xournal++ text strokes do not support affine transformations, so we have to convert on best effort here. The best solution for now is to export as an image
-                /*
-                                let origin = textstroke.transform.translation_part();
-                                let untransformed_text_size = textstroke.text_style.untransformed_size(
-                                    &mut piet_cairo::CairoText::new(),
-                                    textstroke.text.clone(),
-                                )?;
-                                let font_scale = textstroke
-                                    .bounds()
-                                    .extents()
-                                    .component_div(&untransformed_text_size);
-                                let scaled_font_size = (textstroke.text_style.font_size * font_scale).mean();
-
-                                Some(xoppformat::XoppStrokeType::XoppText(xoppformat::XoppText {
-                                    x: utils::convert_value_dpi(origin[0], current_dpi, xoppformat::XoppFile::DPI),
-                                    y: utils::convert_value_dpi(origin[1], current_dpi, xoppformat::XoppFile::DPI),
-                                    size: utils::convert_value_dpi(
-                                        scaled_font_size,
-                                        current_dpi,
-                                        xoppformat::XoppFile::DPI,
-                                    ),
-                                    font: textstroke.text_style.font_family,
-                                    color: XoppColor::from(textstroke.text_style.color),
-                                    text: textstroke.text.clone(),
-                                }))
-                */
+                // Xournal++ text strokes do not support affine transformations, so we have to convert on best effort here.
+                // The best solution for now seems to be to export them as a bitmap image.
                 let png_data = match textstroke.export_as_bitmapimage_bytes(
                     image::ImageOutputFormat::Png,
                     RnoteEngine::STROKE_EXPORT_IMAGE_SCALE,

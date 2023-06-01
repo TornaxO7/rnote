@@ -1,21 +1,18 @@
-use std::time::Instant;
-
-use p2d::bounding_volume::{Aabb, BoundingVolume};
-
+// Imports
+use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
+use super::ShapeBuilderBehaviour;
+use crate::constraints::ConstraintRatio;
 use crate::helpers::AabbHelpers;
 use crate::penevents::{PenEvent, PenState};
 use crate::penpath::Element;
 use crate::shapes::QuadraticBezier;
 use crate::style::{indicators, Composer};
-use crate::{Shape, Style};
-
-use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
-use super::ShapeBuilderBehaviour;
-use crate::constraints::ConstraintRatio;
 use crate::Constraints;
+use crate::{Shape, Style};
+use p2d::bounding_volume::{Aabb, BoundingVolume};
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
-/// The quadbez builder state
 enum QuadBezBuilderState {
     Cp {
         start: na::Vector2<f64>,
@@ -32,8 +29,8 @@ enum QuadBezBuilderState {
     },
 }
 
+/// Quadratic bezier builder.
 #[derive(Debug, Clone)]
-/// quadratic bezier builder
 pub struct QuadBezBuilder {
     state: QuadBezBuilderState,
 }
@@ -56,8 +53,6 @@ impl ShapeBuilderBehaviour for QuadBezBuilder {
         _now: Instant,
         mut constraints: Constraints,
     ) -> ShapeBuilderProgress {
-        //log::debug!("state: {:?}, event: {:?}", &self.state, &event);
-
         // we always want to allow horizontal and vertical constraints while building a quadbez
         constraints.ratios.insert(ConstraintRatio::Horizontal);
         constraints.ratios.insert(ConstraintRatio::Vertical);
@@ -105,14 +100,14 @@ impl ShapeBuilderBehaviour for QuadBezBuilder {
         match &self.state {
             QuadBezBuilderState::Cp { start, cp }
             | QuadBezBuilderState::CpFinished { start, cp } => Some(
-                Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*cp))
+                Aabb::new_positive((*start).into(), (*cp).into())
                     .loosened(stroke_width.max(indicators::POS_INDICATOR_RADIUS) / zoom),
             ),
             QuadBezBuilderState::End { start, cp, end } => {
                 let stroke_width = style.stroke_width();
 
-                let mut aabb = Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*end));
-                aabb.take_point(na::Point2::from(*cp));
+                let mut aabb = Aabb::new_positive((*start).into(), (*end).into());
+                aabb.take_point((*cp).into());
 
                 Some(aabb.loosened(stroke_width.max(indicators::POS_INDICATOR_RADIUS) / zoom))
             }

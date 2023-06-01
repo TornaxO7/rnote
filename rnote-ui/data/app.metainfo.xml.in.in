@@ -42,7 +42,7 @@
     <screenshot>
       <image>
         https://raw.githubusercontent.com/flxzt/rnote/main/rnote-ui/data/screenshots/pdf_annotation.png</image>
-      <caption>A PDF annotation</caption>
+      <caption>A Pdf annotation</caption>
     </screenshot>
     <screenshot>
       <image>
@@ -72,6 +72,29 @@
 
   <!-- The changelog should not be translated -->
   <releases>
+    <release version="0.6.0" date="2023-04-23">
+      <description>
+        <p>this release changes:</p>
+        <ul>
+          <li>orga: Rnote now follows a new versioning scheme - feature updates will increment x, while patches will increment y in versions 0.x.y .
+Breakages in the file format will be explicitly announced (but we'll work as hard as possible to avoid them!) and are not reflected in the version anymore.</li>
+          <li>orga: the app is now available for Windows and MacOS! Check the installation section on the website / README, you'll find links to the installer and app bundle there.</li>
+          <li>feature: arrow shapes (thanks to @TornaxO7 )</li>
+          <li>feature: ability to recolor selected strokes (thanks to @Kneemund )</li>
+          <li>feature: isometric background patterns (thanks to @Kneemund )</li>
+          <li>feature: add option to block pinch zoom (thanks to @LeSnake04 )</li>
+          <li>improvement: typewriter keyboard navigation (thanks to @Kneemund )</li>
+          <li>improvement: exiting / closing dialogs and logic (thanks to @adih-20 )</li>
+          <li>improvement: more icons for workspace list entries</li>
+          <li>improvement: associated symbolic icon for .rnote files</li>
+          <li>improvement: added labels for name and directory of the active workspace </li>
+          <li>fix: occasional crashes when doing three-finger swipes</li>
+          <li>fix: size limits for grid builder, preventing slowdowns and crashes (thanks to @Kneemund)</li>
+          <li>fix: strokes not generating hitboxes when pen is being changed mid-stroke</li>
+          <li>fix: limit chars for dirs in edit-workspace dialog</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5.18" date="2023-03-16">
       <description>
         <p>this release changes:</p>
@@ -222,7 +245,7 @@
           <li>improvement: Add zoom buttons to the quick-actions overlay</li>
           <li>improvement: By default use the workspace directory for import and export dialogs, and
             document file for save dialogs</li>
-          <li>fix: PDF export and print sometimes produced empty pages</li>
+          <li>fix: Pdf export and print sometimes produced empty pages</li>
           <li>fix: workspace files list not refreshing after modifying the workspace path</li>
           <li>fix: Selector being canceled when attempting to interact with the selection when
             "touch-drawing" was enabled</li>
@@ -246,7 +269,7 @@
           <li>fix: background pattern tile rendering size</li>
           <li>fix: scrolling with touchpad was not possible when the "permanent hidden scrollbars"
             option was enabled</li>
-          <li>fix: broken SVG export</li>
+          <li>fix: broken Svg export</li>
           <li>fix: image layers when exporting to .xopp</li>
         </ul>
       </description>
@@ -335,7 +358,7 @@
           <li>disclaimer: breaking file format compatibility</li>
           <li>feature: configurable button shortcuts (stylus, mouse)</li>
           <li>change: moved the marker into the brush pen as a style</li>
-          <li>improvement: faster PDF export &amp; fix export with large sheet dimensions</li>
+          <li>improvement: faster Pdf export &amp; fix export with large sheet dimensions</li>
           <li>bug fixes</li>
         </ul>
       </description>
@@ -368,7 +391,7 @@
       <description>
         <p>this release changes:</p>
         <ul>
-          <li>new feature: Export as PDF</li>
+          <li>new feature: Export as Pdf</li>
           <li>bug fixes</li>
         </ul>
       </description>
@@ -420,7 +443,7 @@
       <description>
         <p>this release changes:</p>
         <ul>
-          <li>PDF import as vector images</li>
+          <li>Pdf import as vector images</li>
           <li>bug fixes</li>
         </ul>
       </description>
@@ -451,7 +474,7 @@
           <li>an updated file format. !!! Breaks compatibility to older versions. Please export
             existing files before upgrading / downgrade temporarily (explained how to downgrade at
             github.com/flxzt/rnote)</li>
-          <li>new features: PDF import, clipboard and drag&amp;drop support</li>
+          <li>new features: Pdf import, clipboard and drag&amp;drop support</li>
           <li>performance improvements in stroke rendering, selecting, erasing by parallelizing
             these operations</li>
           <li>UI improvements</li>

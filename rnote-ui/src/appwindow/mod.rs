@@ -1,26 +1,23 @@
+// Modules
 mod appsettings;
 mod appwindowactions;
 mod imp;
 
 // Imports
+use crate::{
+    config, RnApp, RnCanvas, RnCanvasWrapper, RnOverlays, RnSettingsPanel, RnWorkspaceBrowser,
+    {dialogs, RnMainHeader},
+};
 use adw::{prelude::*, subclass::prelude::*};
 use gettextrs::gettext;
-use gtk4::gdk;
-use gtk4::{gio, glib, glib::clone, Application, Box, Button, FileChooserNative, IconTheme};
+use gtk4::{gdk, gio, glib, glib::clone, Application, Box, Button, IconTheme};
 use rnote_compose::Color;
 use rnote_engine::pens::pensconfig::brushconfig::BrushStyle;
 use rnote_engine::pens::pensconfig::shaperconfig::ShaperStyle;
 use rnote_engine::pens::PenStyle;
 use rnote_engine::utils::GdkRGBAHelpers;
 use rnote_engine::{engine::EngineTask, WidgetFlags};
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
-
-use crate::{
-    config, RnApp, RnCanvas, RnCanvasWrapper, RnOverlays, RnSettingsPanel, RnWorkspaceBrowser,
-    {dialogs, RnMainHeader},
-};
 
 glib::wrapper! {
     pub(crate) struct RnAppWindow(ObjectSubclass<imp::RnAppWindow>)
@@ -77,16 +74,22 @@ impl RnAppWindow {
         self.set_property("touch-drawing", touch_drawing.to_value());
     }
 
+    #[allow(unused)]
+    pub(crate) fn focus_mode(&self) -> bool {
+        self.property::<bool>("focus-mode")
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set_focus_mode(&self, focus_mode: bool) {
+        self.set_property("focus-mode", focus_mode.to_value());
+    }
+
     pub(crate) fn app(&self) -> RnApp {
         self.application().unwrap().downcast::<RnApp>().unwrap()
     }
 
     pub(crate) fn app_settings(&self) -> gio::Settings {
         self.imp().app_settings.clone()
-    }
-
-    pub(crate) fn filechoosernative(&self) -> Rc<RefCell<Option<FileChooserNative>>> {
-        self.imp().filechoosernative.clone()
     }
 
     pub(crate) fn overlays(&self) -> RnOverlays {
@@ -139,6 +142,7 @@ impl RnAppWindow {
         imp.mainheader.get().init(self);
         imp.mainheader.get().canvasmenu().init(self);
         imp.mainheader.get().appmenu().init(self);
+        imp.overlays.get().colorpicker().init(self);
 
         // An initial tab. Must! come before setting up the settings binds and import
         self.add_initial_tab();
@@ -169,8 +173,8 @@ impl RnAppWindow {
         // Anything that needs to be done right before showing the appwindow
 
         // Set undo / redo as not sensitive as default ( setting it in .ui file did not work for some reason )
-        self.mainheader().undo_button().set_sensitive(false);
-        self.mainheader().redo_button().set_sensitive(false);
+        self.overlays().undo_button().set_sensitive(false);
+        self.overlays().redo_button().set_sensitive(false);
         self.refresh_ui_from_engine(&self.active_tab());
     }
 
@@ -220,18 +224,37 @@ impl RnAppWindow {
             canvas.set_empty(false);
         }
         if widget_flags.update_view {
-            let camera_offset = canvas.engine().borrow().camera.offset;
-            // this updates the canvas adjustment values with the ones from the camera
-            canvas.update_camera_offset(camera_offset);
+            let camera_offset = canvas.engine().borrow().camera.offset();
+            // Keep the adjustment values in sync
+            canvas.hadjustment().unwrap().set_value(camera_offset[0]);
+            canvas.vadjustment().unwrap().set_value(camera_offset[1]);
+        }
+        if widget_flags.zoomed_temporarily {
+            let total_zoom = canvas.engine().borrow().camera.total_zoom();
+
+            canvas.queue_resize();
+            self.mainheader()
+                .canvasmenu()
+                .update_zoom_reset_label(total_zoom);
+        }
+        if widget_flags.zoomed {
+            let total_zoom = canvas.engine().borrow().camera.total_zoom();
+            let viewport = canvas.engine().borrow().camera.viewport();
+
+            canvas.canvas_layout_manager().update_old_viewport(viewport);
+            self.mainheader()
+                .canvasmenu()
+                .update_zoom_reset_label(total_zoom);
+            canvas.queue_resize();
         }
         if widget_flags.deselect_color_setters {
             self.overlays().colorpicker().deselect_setters();
         }
         if let Some(hide_undo) = widget_flags.hide_undo {
-            self.mainheader().undo_button().set_sensitive(!hide_undo);
+            self.overlays().undo_button().set_sensitive(!hide_undo);
         }
         if let Some(hide_redo) = widget_flags.hide_redo {
-            self.mainheader().redo_button().set_sensitive(!hide_redo);
+            self.overlays().redo_button().set_sensitive(!hide_redo);
         }
         if let Some(enable_text_preprocessing) = widget_flags.enable_text_preprocessing {
             canvas.set_text_preprocessing(enable_text_preprocessing);
@@ -270,33 +293,28 @@ impl RnAppWindow {
 
     /// Creates a new tab and set it as selected
     pub(crate) fn new_tab(&self) -> adw::TabPage {
-        let current_engine_config = match self
+        let current_engine_config = self
             .active_tab()
             .canvas()
             .engine()
             .borrow()
-            .extract_engine_config()
-        {
-            Ok(c) => Some(c),
-            Err(e) => {
-                log::error!("failed to extract engine config from active tab, Err: {e:?}");
-                None
-            }
-        };
+            .extract_engine_config();
         let new_wrapper = RnCanvasWrapper::new();
-        if let Some(current_engine_config) = current_engine_config {
-            match new_wrapper
+
+        let mut widget_flags = new_wrapper
+            .canvas()
+            .engine()
+            .borrow_mut()
+            .load_engine_config(current_engine_config, crate::env::pkg_data_dir().ok());
+        widget_flags.merge(
+            new_wrapper
                 .canvas()
                 .engine()
                 .borrow_mut()
-                .load_engine_config(current_engine_config, crate::env::pkg_data_dir().ok())
-            {
-                Ok(wf) => self.handle_widget_flags(wf, &new_wrapper.canvas()),
-                Err(e) => {
-                    log::error!("failed to load current engine config into new tab, Err: {e:?}")
-                }
-            }
-        }
+                .doc_resize_to_fit_strokes(),
+        );
+        new_wrapper.canvas().update_rendering_current_viewport();
+        self.handle_widget_flags(widget_flags, &new_wrapper.canvas());
 
         // The tab page connections are handled in page_attached, which is fired when the page is added to the tabview
         let page = self.overlays().tabview().append(&new_wrapper);
@@ -360,7 +378,12 @@ impl RnAppWindow {
             .map(|(found, _)| found)
     }
 
-    pub(crate) fn clear_rendering_inactive_tabs(&self) {
+    /// sets all unselected tabs inactive.
+    ///
+    /// Currently this clears the rendering and deinits the current pen of the engine in the tabs.
+    ///
+    /// To set a tab active again and reinit all necessary state, use `engine().borrow_mut().set_active(true)`.
+    pub(crate) fn set_unselected_tabs_inactive(&self) {
         for inactive_page in self
             .overlays()
             .tabview()
@@ -370,14 +393,14 @@ impl RnAppWindow {
             .map(|o| o.downcast::<adw::TabPage>().unwrap())
             .filter(|p| !p.is_selected())
         {
-            inactive_page
+            let canvas = inactive_page
                 .child()
                 .downcast::<RnCanvasWrapper>()
                 .unwrap()
-                .canvas()
-                .engine()
-                .borrow_mut()
-                .clear_rendering();
+                .canvas();
+
+            // no need to handle the widget flags, since the tabs become inactive
+            let _ = canvas.engine().borrow_mut().set_active(false);
         }
     }
 
@@ -549,7 +572,7 @@ impl RnAppWindow {
                         Ok((bytes, _)) => {
                             if let Err(e) = canvas.load_in_pdf_bytes(bytes.to_vec(), target_pos, None).await {
                                 log::error!("load_in_pdf_bytes() failed with Err: {e:?}");
-                                appwindow.overlays().dispatch_toast_error(&gettext("Opening PDF file failed"));
+                                appwindow.overlays().dispatch_toast_error(&gettext("Opening Pdf file failed"));
                             }
                         }
                         Err(e) => log::error!("failed to load bytes, Err: {e:?}"),
@@ -591,14 +614,14 @@ impl RnAppWindow {
         let can_undo = canvas.engine().borrow().can_undo();
         let can_redo = canvas.engine().borrow().can_redo();
 
-        self.mainheader().undo_button().set_sensitive(can_undo);
-        self.mainheader().redo_button().set_sensitive(can_redo);
+        self.overlays().undo_button().set_sensitive(can_undo);
+        self.overlays().redo_button().set_sensitive(can_redo);
 
         // we change the state through the actions, because they themselves hold state. ( e.g. used to display tickboxes for boolean actions )
         adw::prelude::ActionGroupExt::activate_action(
             self,
             "doc-layout",
-            Some(&doc_layout.nick().to_variant()),
+            Some(&doc_layout.to_string().to_variant()),
         );
         adw::prelude::ActionGroupExt::change_action_state(
             self,
@@ -613,7 +636,7 @@ impl RnAppWindow {
         adw::prelude::ActionGroupExt::change_action_state(
             self,
             "pen-style",
-            &pen_style.to_variant(),
+            &pen_style.to_string().to_variant(),
         );
 
         // Current pen
@@ -845,7 +868,7 @@ impl RnAppWindow {
             active_engine.penholder.pen_mode_state = prev_engine.penholder.pen_mode_state.clone();
             widget_flags
                 .merge(active_engine.change_pen_style(prev_engine.penholder.current_pen_style()));
-            // ensures a clean state for the current pen
+            // ensures a clean and initialized state for the current pen
             widget_flags.merge(active_engine.reinstall_pen_current_style());
             active_engine.import_prefs = prev_engine.import_prefs;
             active_engine.export_prefs = prev_engine.export_prefs;

@@ -1,6 +1,9 @@
+// Imports
+use crate::{config, dialogs, RnAppWindow, RnCanvas};
 use gettextrs::gettext;
 use gtk4::{
-    gdk, gio, glib, glib::clone, prelude::*, PrintOperation, PrintOperationAction, Unit, Window,
+    gdk, gio, glib, glib::clone, prelude::*, PrintOperation, PrintOperationAction, Unit,
+    UriLauncher, Window,
 };
 use piet::RenderContext;
 use rnote_compose::helpers::Vector2Helpers;
@@ -8,18 +11,18 @@ use rnote_compose::penevents::ShortcutKey;
 use rnote_engine::document::Layout;
 use rnote_engine::engine::RNOTE_STROKE_CONTENT_MIME_TYPE;
 use rnote_engine::pens::PenStyle;
-use rnote_engine::{render, Camera, DrawBehaviour, RnoteEngine};
+use rnote_engine::{render, Camera, DrawBehaviour, RnoteEngine, WidgetFlags};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Instant;
-
-use crate::{canvas::RnCanvasLayout, config, dialogs, RnAppWindow, RnCanvas};
 
 const CLIPBOARD_INPUT_STREAM_BUFSIZE: usize = 4096;
 
 impl RnAppWindow {
-    /// Boolean actions have no target, and a boolean state. They have a default implementation for the activate signal, which requests the state to be inverted, and the default implementation for change_state, which sets the state to the request.
+    /// Boolean actions have no target, and a boolean state. They have a default implementation for the activate signal,
+    /// which requests the state to be inverted, and the default implementation for change_state, which sets the state to the request.
     /// We generally want to connect to the change_state signal. (but then have to set the state with action.set_state() )
-    /// We can then either toggle the state through activating the action, or set the state explicitly through action.change_state(<request>)
+    /// We can then either toggle the state through activating the action, or set the state explicitly through `action.change_state(<request>)`
     pub(crate) fn setup_actions(&self) {
         let action_fullscreen = gio::PropertyAction::new("fullscreen", self, "fullscreened");
         self.add_action(&action_fullscreen);
@@ -55,6 +58,8 @@ impl RnAppWindow {
         self.add_action(&action_righthanded);
         let action_touch_drawing = gio::PropertyAction::new("touch-drawing", self, "touch-drawing");
         self.add_action(&action_touch_drawing);
+        let action_focus_mode = gio::PropertyAction::new("focus-mode", self, "focus-mode");
+        self.add_action(&action_focus_mode);
 
         let action_pen_sounds =
             gio::SimpleAction::new_stateful("pen-sounds", None, false.to_variant());
@@ -74,8 +79,8 @@ impl RnAppWindow {
         self.add_action(&action_doc_layout);
         let action_pen_style = gio::SimpleAction::new_stateful(
             "pen-style",
-            Some(&PenStyle::static_variant_type()),
-            PenStyle::Brush.to_variant(),
+            Some(&String::static_variant_type()),
+            String::from("brush").to_variant(),
         );
         self.add_action(&action_pen_style);
         let action_undo_stroke = gio::SimpleAction::new("undo", None);
@@ -90,11 +95,10 @@ impl RnAppWindow {
         self.add_action(&action_zoomin);
         let action_zoomout = gio::SimpleAction::new("zoom-out", None);
         self.add_action(&action_zoomout);
-        let action_zoom_to_value =
-            gio::SimpleAction::new("zoom-to-value", Some(&glib::VariantType::new("d").unwrap()));
-        self.add_action(&action_zoom_to_value);
         let action_add_page_to_doc = gio::SimpleAction::new("add-page-to-doc", None);
         self.add_action(&action_add_page_to_doc);
+        let action_remove_page_from_doc = gio::SimpleAction::new("remove-page-from-doc", None);
+        self.add_action(&action_remove_page_from_doc);
         let action_resize_to_fit_strokes = gio::SimpleAction::new("resize-to-fit-strokes", None);
         self.add_action(&action_resize_to_fit_strokes);
         let action_return_origin_page = gio::SimpleAction::new("return-origin-page", None);
@@ -170,7 +174,11 @@ impl RnAppWindow {
 
         // Donate
         action_donate.connect_activate(clone!(@weak self as appwindow => move |_, _| {
-            gtk4::show_uri(None::<&Window>, config::APP_DONATE_URL, 0);
+            UriLauncher::new(config::APP_DONATE_URL).launch(None::<&Window>, gio::Cancellable::NONE, |res| {
+                if let Err(e) = res {
+                    log::error!("launching donate URL failed, Err: {e:?}");
+                }
+            })
         }));
 
         // Keyboard shortcuts
@@ -230,55 +238,55 @@ impl RnAppWindow {
 
         // Export engine state
         action_debug_export_engine_state.connect_activate(
-            clone!(@weak self as appwindow => move |_action_debug_export_engine_state, _target| {
-                dialogs::export::filechooser_export_engine_state(&appwindow, &appwindow.active_tab().canvas());
+            clone!(@weak self as appwindow => move |_, _| {
+                glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                    dialogs::export::filechooser_export_engine_state(&appwindow, &appwindow.active_tab().canvas()).await;
+                }));
             }),
         );
 
         // Export engine config
         action_debug_export_engine_config.connect_activate(
-            clone!(@weak self as appwindow => move |_action_debug_export_engine_config, _target| {
-                dialogs::export::filechooser_export_engine_config(&appwindow, &appwindow.active_tab().canvas());
+            clone!(@weak self as appwindow => move |_, _| {
+                glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                    dialogs::export::filechooser_export_engine_config(&appwindow, &appwindow.active_tab().canvas()).await;
+                }));
             }),
         );
 
         // Doc layout
         action_doc_layout.connect_activate(
             clone!(@weak self as appwindow => move |action_doc_layout, target| {
-                let doc_layout = target.unwrap().str().unwrap();
+                let doc_layout_str = target.unwrap().str().unwrap();
                 let canvas = appwindow.active_tab().canvas();
                 let prev_layout = canvas.engine().borrow().document.layout;
-                action_doc_layout.set_state(doc_layout.to_variant());
-
-                let doc_layout = match doc_layout {
-                    "fixed-size" => {
-                        Layout::FixedSize
-                    },
-                    "continuous-vertical" => {
-                        Layout::ContinuousVertical
-                    },
-                    "semi-infinite" => {
-                        Layout::SemiInfinite
-                    },
-                    "infinite" => {
-                        Layout::Infinite
-                    },
-                    other => {
-                        log::error!("doc-layout action activated with invalid target string: {other}");
-                        unimplemented!()
+                let doc_layout = match Layout::from_str(doc_layout_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("doc-layout action activated with invalid target, Err: {e:}");
+                        return;
                     }
                 };
+                action_doc_layout.set_state(doc_layout_str.to_variant());
 
-                appwindow.mainheader().fixedsize_quickactions_box().set_visible(doc_layout == Layout::FixedSize);
+                appwindow
+                    .mainheader()
+                    .canvasmenu()
+                    .fixedsize_quickactions_box()
+                    .set_visible(doc_layout == Layout::FixedSize);
+
+                let mut widget_flags = WidgetFlags::default();
 
                 if prev_layout != doc_layout {
                     canvas.engine().borrow_mut().document.layout = doc_layout;
-                    canvas.engine().borrow_mut().resize_to_fit_strokes();
+                    widget_flags.merge(canvas.engine().borrow_mut().doc_resize_to_fit_strokes());
                 } else {
-                    canvas.engine().borrow_mut().resize_autoexpand();
+                    widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
                 }
-                canvas.update_engine_rendering();
-            }));
+                canvas.update_rendering_current_viewport();
+                appwindow.handle_widget_flags(widget_flags, &canvas);
+            }),
+        );
 
         // Pen sounds
         action_pen_sounds.connect_change_state(
@@ -307,19 +315,23 @@ impl RnAppWindow {
         // Pen style
         action_pen_style.connect_activate(
             clone!(@weak self as appwindow => move |action, target| {
-                let new_pen_style = target.unwrap().get::<PenStyle>().unwrap();
-                action.set_state(new_pen_style.to_variant());
+                let pen_style_str = target.unwrap().str().unwrap();
+                let pen_style = match PenStyle::from_str(pen_style_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::error!("pen-style action activated with invalid target, Err: {e:}");
+                        return;
+                    }
+                };
+                action.set_state(pen_style_str.to_variant());
+
                 let canvas = appwindow.active_tab().canvas();
 
-                // don't change the style if the current style with override is already the same (e.g. when switched to from the pen button, not by clicking the pen page)
-                if new_pen_style != canvas.engine().borrow().penholder.current_pen_style_w_override() {
-                    let mut widget_flags = canvas.engine().borrow_mut().change_pen_style(
-                        new_pen_style,
-                    );
-                    widget_flags.merge(canvas.engine().borrow_mut().change_pen_style_override(
-                        None,
-                    ));
-
+                // don't change the style if the current style with override is already the same
+                // (e.g. when switched to from the pen button, not by clicking the pen page)
+                if pen_style != canvas.engine().borrow().penholder.current_pen_style_w_override() {
+                    let mut widget_flags = canvas.engine().borrow_mut().change_pen_style(pen_style);
+                    widget_flags.merge(canvas.engine().borrow_mut().change_pen_style_override(None));
                     appwindow.handle_widget_flags(widget_flags, &canvas);
                 }
             }),
@@ -390,12 +402,13 @@ impl RnAppWindow {
             clone!(@weak self as appwindow => move |_action_selection_trash, _| {
                 let canvas = appwindow.active_tab().canvas();
 
-                let mut widget_flags = canvas.engine().borrow_mut().record(Instant::now());
+                let mut widget_flags = WidgetFlags::default();
                 let selection_keys = canvas.engine().borrow().store.selection_keys_as_rendered();
                 canvas.engine().borrow_mut().store.set_trashed_keys(&selection_keys, true);
-                widget_flags.merge(canvas.engine().borrow_mut().update_state_current_pen());
-                canvas.engine().borrow_mut().resize_autoexpand();
-                canvas.update_engine_rendering();
+                widget_flags.merge(canvas.engine().borrow_mut().current_pen_update_state());
+                widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
+                widget_flags.merge(canvas.engine().borrow_mut().record(Instant::now()));
+                canvas.update_rendering_current_viewport();
 
                 appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
@@ -406,12 +419,13 @@ impl RnAppWindow {
             clone!(@weak self as appwindow => move |_action_selection_duplicate, _| {
                 let canvas = appwindow.active_tab().canvas();
 
-                let mut widget_flags = canvas.engine().borrow_mut().record(Instant::now());
+                let mut widget_flags = WidgetFlags::default();
                 let new_selected = canvas.engine().borrow_mut().store.duplicate_selection();
                 canvas.engine().borrow_mut().store.update_geometry_for_strokes(&new_selected);
-                widget_flags.merge(canvas.engine().borrow_mut().update_state_current_pen());
-                canvas.engine().borrow_mut().resize_autoexpand();
-                canvas.update_engine_rendering();
+                widget_flags.merge(canvas.engine().borrow_mut().current_pen_update_state());
+                widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
+                widget_flags.merge(canvas.engine().borrow_mut().record(Instant::now()));
+                canvas.update_rendering_current_viewport();
 
                 appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
@@ -427,13 +441,14 @@ impl RnAppWindow {
             clone!(@weak self as appwindow => move |_action_selection_select_all, _| {
                 let canvas = appwindow.active_tab().canvas();
 
-                let mut widget_flags = canvas.engine().borrow_mut().record(Instant::now());
+                let mut widget_flags = WidgetFlags::default();
                 let all_strokes = canvas.engine().borrow().store.stroke_keys_as_rendered();
                 canvas.engine().borrow_mut().store.set_selected_keys(&all_strokes, true);
                 widget_flags.merge(canvas.engine().borrow_mut().change_pen_style(PenStyle::Selector));
-                widget_flags.merge(canvas.engine().borrow_mut().update_state_current_pen());
-                canvas.engine().borrow_mut().resize_autoexpand();
-                canvas.update_engine_rendering();
+                widget_flags.merge(canvas.engine().borrow_mut().current_pen_update_state());
+                widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
+                widget_flags.merge(canvas.engine().borrow_mut().record(Instant::now()));
+                canvas.update_rendering_current_viewport();
 
                 appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
@@ -444,13 +459,14 @@ impl RnAppWindow {
             clone!(@weak self as appwindow => move |_action_selection_deselect_all, _| {
                 let canvas = appwindow.active_tab().canvas();
 
-                let mut widget_flags = canvas.engine().borrow_mut().record(Instant::now());
+                let mut widget_flags = WidgetFlags::default();
                 let all_strokes = canvas.engine().borrow().store.selection_keys_as_rendered();
                 canvas.engine().borrow_mut().store.set_selected_keys(&all_strokes, false);
                 widget_flags.merge(canvas.engine().borrow_mut().change_pen_style(PenStyle::Selector));
-                widget_flags.merge(canvas.engine().borrow_mut().update_state_current_pen());
-                canvas.engine().borrow_mut().resize_autoexpand();
-                canvas.update_engine_rendering();
+                widget_flags.merge(canvas.engine().borrow_mut().current_pen_update_state());
+                widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
+                widget_flags.merge(canvas.engine().borrow_mut().record(Instant::now()));
+                canvas.update_rendering_current_viewport();
 
                 appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
@@ -466,7 +482,7 @@ impl RnAppWindow {
             let canvas = appwindow.active_tab().canvas();
 
             let widget_flags = canvas.engine().borrow_mut().undo(Instant::now());
-            canvas.update_engine_rendering();
+            canvas.update_rendering_current_viewport();
 
             appwindow.handle_widget_flags(widget_flags, &canvas);
         }));
@@ -476,68 +492,78 @@ impl RnAppWindow {
             let canvas = appwindow.active_tab().canvas();
 
             let widget_flags = canvas.engine().borrow_mut().redo(Instant::now());
-            canvas.update_engine_rendering();
-
+            canvas.update_rendering_current_viewport();
             appwindow.handle_widget_flags(widget_flags, &canvas);
         }));
 
         // Zoom reset
         action_zoom_reset.connect_activate(clone!(@weak self as appwindow => move |_,_| {
             let canvas = appwindow.active_tab().canvas();
-
+            let viewport_center = canvas.engine().borrow().camera.viewport_center();
             let new_zoom = Camera::ZOOM_DEFAULT;
-            let current_doc_center = canvas.current_view_center_coords();
-            adw::prelude::ActionGroupExt::activate_action(&appwindow, "zoom-to-value", Some(&new_zoom.to_variant()));
-            canvas.center_view_around_coords(current_doc_center);
+
+            let mut widget_flags = canvas.engine().borrow_mut().zoom_w_timeout(new_zoom);
+            widget_flags.merge(canvas.engine().borrow_mut().camera.set_viewport_center(viewport_center));
+            appwindow.handle_widget_flags(widget_flags, &canvas)
         }));
 
         // Zoom fit to width
         action_zoom_fit_width.connect_activate(clone!(@weak self as appwindow => move |_,_| {
             let canvaswrapper = appwindow.active_tab();
+            let canvas = canvaswrapper.canvas();
+            let viewport_center = canvas.engine().borrow().camera.viewport_center();
+            let new_zoom = f64::from(canvaswrapper.scroller().width())
+                / (canvaswrapper.canvas().engine().borrow().document.format.width + 2.0 * RnCanvas::ZOOM_FIT_WIDTH_MARGIN);
 
-            let new_zoom = f64::from(canvaswrapper.scroller().width()) / (canvaswrapper.canvas().engine().borrow().document.format.width + 2.0 * RnCanvasLayout::OVERSHOOT_HORIZONTAL);
-            let current_doc_center = canvaswrapper.canvas().current_view_center_coords();
-            adw::prelude::ActionGroupExt::activate_action(&appwindow, "zoom-to-value", Some(&new_zoom.to_variant()));
-            canvaswrapper.canvas().center_view_around_coords(current_doc_center);
+            let mut widget_flags = canvas.engine().borrow_mut().zoom_w_timeout(new_zoom);
+            widget_flags.merge(canvas.engine().borrow_mut().camera.set_viewport_center(viewport_center));
+            appwindow.handle_widget_flags(widget_flags, &canvas)
         }));
 
         // Zoom in
         action_zoomin.connect_activate(clone!(@weak self as appwindow => move |_,_| {
             let canvas = appwindow.active_tab().canvas();
+            let viewport_center = canvas.engine().borrow().camera.viewport_center();
+            let new_zoom = canvas.engine().borrow().camera.total_zoom() * (1.0 + RnCanvas::ZOOM_SCROLL_STEP);
 
-            let new_zoom = canvas.engine().borrow().camera.total_zoom() * (1.0 + RnCanvas::ZOOM_STEP);
-            let current_doc_center = canvas.current_view_center_coords();
-            adw::prelude::ActionGroupExt::activate_action(&appwindow, "zoom-to-value", Some(&new_zoom.to_variant()));
-            canvas.center_view_around_coords(current_doc_center);
+            let mut widget_flags = canvas.engine().borrow_mut().zoom_w_timeout(new_zoom);
+            widget_flags.merge(canvas.engine().borrow_mut().camera.set_viewport_center(viewport_center));
+            appwindow.handle_widget_flags(widget_flags, &canvas)
         }));
 
         // Zoom out
         action_zoomout.connect_activate(clone!(@weak self as appwindow => move |_,_| {
             let canvas = appwindow.active_tab().canvas();
+            let viewport_center = canvas.engine().borrow().camera.viewport_center();
+            let new_zoom = canvas.engine().borrow().camera.total_zoom() * (1.0 - RnCanvas::ZOOM_SCROLL_STEP);
 
-            let new_zoom = canvas.engine().borrow().camera.total_zoom() * (1.0 - RnCanvas::ZOOM_STEP);
-            let current_doc_center = canvas.current_view_center_coords();
-            adw::prelude::ActionGroupExt::activate_action(&appwindow, "zoom-to-value", Some(&new_zoom.to_variant()));
-            canvas.center_view_around_coords(current_doc_center);
+            let mut widget_flags = canvas.engine().borrow_mut().zoom_w_timeout(new_zoom);
+            widget_flags.merge(canvas.engine().borrow_mut().camera.set_viewport_center(viewport_center));
+            appwindow.handle_widget_flags(widget_flags, &canvas)
         }));
-
-        // Zoom to value
-        action_zoom_to_value.connect_activate(
-            clone!(@weak self as appwindow => move |_action_zoom_to_value, target| {
-                let new_zoom = target.unwrap().get::<f64>().unwrap().clamp(Camera::ZOOM_MIN, Camera::ZOOM_MAX);
-                appwindow.active_tab().canvas().zoom_temporarily_then_scale_to_after_timeout(new_zoom);
-            }));
 
         // Add page to doc in fixed size mode
         action_add_page_to_doc.connect_activate(
             clone!(@weak self as appwindow => move |_action_add_page_to_doc, _target| {
                 let canvas = appwindow.active_tab().canvas();
 
-                let format_height = canvas.engine().borrow().document.format.height;
-                let new_doc_height = canvas.engine().borrow().document.height + format_height;
-                canvas.engine().borrow_mut().document.height = new_doc_height;
+                if canvas.engine().borrow_mut().doc_add_page_fixed_size() {
+                    canvas.update_rendering_current_viewport();
+                }
+            }),
+        );
 
-                canvas.update_engine_rendering();
+        // Remove page from doc in fixed size mode
+        action_remove_page_from_doc.connect_activate(
+            clone!(@weak self as appwindow => move |_action_remove_page_from_doc, _target| {
+                let canvas = appwindow.active_tab().canvas();
+
+                let mut widget_flags = WidgetFlags::default();
+                if canvas.engine().borrow_mut().doc_remove_page_fixed_size() {
+                    widget_flags.merge(canvas.engine().borrow_mut().record(Instant::now()));
+                    canvas.update_rendering_current_viewport();
+                }
+                appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
         );
 
@@ -546,8 +572,9 @@ impl RnAppWindow {
             clone!(@weak self as appwindow => move |_action_resize_to_fit_strokes, _target| {
                 let canvas = appwindow.active_tab().canvas();
 
-                canvas.engine().borrow_mut().resize_to_fit_strokes();
-                canvas.update_engine_rendering();
+                let widget_flags = canvas.engine().borrow_mut().doc_resize_to_fit_strokes();
+                canvas.update_rendering_current_viewport();
+                appwindow.handle_widget_flags(widget_flags, &canvas);
             }),
         );
 
@@ -556,8 +583,9 @@ impl RnAppWindow {
             let canvas = appwindow.active_tab().canvas();
 
             canvas.return_to_origin_page();
-            canvas.engine().borrow_mut().resize_autoexpand();
-            canvas.update_engine_rendering();
+            let widget_flags = canvas.engine().borrow_mut().doc_resize_autoexpand();
+            canvas.update_rendering_current_viewport();
+            appwindow.handle_widget_flags(widget_flags, &canvas);
         }));
 
         // New doc
@@ -567,7 +595,9 @@ impl RnAppWindow {
 
         // Open doc
         action_open_doc.connect_activate(clone!(@weak self as appwindow => move |_, _| {
-            dialogs::import::filechooser_open_doc(&appwindow);
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::import::filedialog_open_doc(&appwindow).await;
+            }));
         }));
 
         // Save doc
@@ -589,14 +619,16 @@ impl RnAppWindow {
                     // No success toast on saving without dialog, success is already indicated in the header title
                 } else {
                     // Open a dialog to choose a save location
-                    dialogs::export::filechooser_save_doc_as(&appwindow, &canvas);
+                    dialogs::export::dialog_save_doc_as(&appwindow, &canvas).await;
                 }
             }));
         }));
 
         // Save doc as
         action_save_doc_as.connect_activate(clone!(@weak self as appwindow => move |_, _| {
-            dialogs::export::filechooser_save_doc_as(&appwindow, &appwindow.active_tab().canvas());
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::export::dialog_save_doc_as(&appwindow, &appwindow.active_tab().canvas()).await;
+            }));
         }));
 
         // Print doc
@@ -711,28 +743,36 @@ impl RnAppWindow {
 
         // Import
         action_import_file.connect_activate(clone!(@weak self as appwindow => move |_,_| {
-            dialogs::import::filechooser_import_file(&appwindow);
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::import::filedialog_import_file(&appwindow).await;
+            }));
         }));
 
         // Export document
         action_export_doc.connect_activate(clone!(@weak self as appwindow => move |_,_| {
-            dialogs::export::dialog_export_doc_w_prefs(&appwindow, &appwindow.active_tab().canvas());
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::export::dialog_export_doc_w_prefs(&appwindow, &appwindow.active_tab().canvas()).await;
+            }));
         }));
 
         // Export document pages
         action_export_doc_pages.connect_activate(clone!(@weak self as appwindow => move |_,_| {
-            dialogs::export::dialog_export_doc_pages_w_prefs(&appwindow, &appwindow.active_tab().canvas());
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::export::dialog_export_doc_pages_w_prefs(&appwindow, &appwindow.active_tab().canvas()).await;
+            }));
         }));
 
         // Export selection
         action_export_selection.connect_activate(clone!(@weak self as appwindow => move |_,_| {
-            let canvas = appwindow.active_tab().canvas();
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                let canvas = appwindow.active_tab().canvas();
 
-            if !canvas.engine().borrow().store.selection_keys_unordered().is_empty() {
-                dialogs::export::dialog_export_selection_w_prefs(&appwindow, &appwindow.active_tab().canvas());
-            } else {
-                appwindow.overlays().dispatch_toast_error(&gettext("Exporting selection failed, nothing selected"));
-            }
+                if !canvas.engine().borrow().store.selection_keys_unordered().is_empty() {
+                    dialogs::export::dialog_export_selection_w_prefs(&appwindow, &appwindow.active_tab().canvas()).await;
+                } else {
+                    appwindow.overlays().dispatch_toast_error(&gettext("Exporting selection failed, nothing selected"));
+                }
+            }));
         }));
 
         // Clipboard copy
@@ -749,8 +789,6 @@ impl RnAppWindow {
 
             match content {
                 Some((data, mime_type)) => {
-                    //log::debug!("set clipboard with data: {:02x?}, mime-type: {}", data, mime_type);
-
                     let content = gdk::ContentProvider::for_bytes(mime_type.as_str(), &glib::Bytes::from_owned(data));
 
                     if let Err(e) = appwindow.clipboard().set_content(Some(&content)) {

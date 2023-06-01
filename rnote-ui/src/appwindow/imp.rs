@@ -1,10 +1,13 @@
+// Imports
+use crate::{
+    config, RnOverlays, RnSettingsPanel, RnWorkspaceBrowser, {dialogs, RnMainHeader},
+};
 use adw::{prelude::*, subclass::prelude::*};
 use gettextrs::gettext;
-use gtk4::PadActionType;
 use gtk4::{
     gdk, gio, glib, glib::clone, Align, ArrowType, Box, Button, CompositeTemplate, CornerType,
-    CssProvider, FileChooserNative, GestureDrag, Grid, Inhibit, PackType, PadController,
-    PositionType, PropagationPhase, StyleContext,
+    CssProvider, GestureDrag, Grid, Inhibit, PackType, PadActionType, PadController, PositionType,
+    PropagationPhase,
 };
 use once_cell::sync::Lazy;
 use std::{
@@ -12,16 +15,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::{
-    config, RnOverlays, RnSettingsPanel, RnWorkspaceBrowser, {dialogs, RnMainHeader},
-};
-
-#[allow(missing_debug_implementations)]
-#[derive(CompositeTemplate)]
+#[derive(Debug, CompositeTemplate)]
 #[template(resource = "/com/github/flxzt/rnote/ui/appwindow.ui")]
 pub(crate) struct RnAppWindow {
     pub(crate) app_settings: gio::Settings,
-    pub(crate) filechoosernative: Rc<RefCell<Option<FileChooserNative>>>,
     pub(crate) drawing_pad_controller: RefCell<Option<PadController>>,
     pub(crate) autosave_source_id: RefCell<Option<glib::SourceId>>,
     pub(crate) periodic_configsave_source_id: RefCell<Option<glib::SourceId>>,
@@ -31,6 +28,7 @@ pub(crate) struct RnAppWindow {
     pub(crate) righthanded: Cell<bool>,
     pub(crate) block_pinch_zoom: Cell<bool>,
     pub(crate) touch_drawing: Cell<bool>,
+    pub(crate) focus_mode: Cell<bool>,
 
     #[template_child]
     pub(crate) main_grid: TemplateChild<Grid>,
@@ -66,7 +64,6 @@ impl Default for RnAppWindow {
     fn default() -> Self {
         Self {
             app_settings: gio::Settings::new(config::APP_ID),
-            filechoosernative: Rc::new(RefCell::new(None)),
             drawing_pad_controller: RefCell::new(None),
             autosave_source_id: RefCell::new(None),
             periodic_configsave_source_id: RefCell::new(None),
@@ -76,6 +73,7 @@ impl Default for RnAppWindow {
             righthanded: Cell::new(true),
             block_pinch_zoom: Cell::new(false),
             touch_drawing: Cell::new(false),
+            focus_mode: Cell::new(false),
 
             main_grid: TemplateChild::<Grid>::default(),
             overlays: TemplateChild::<RnOverlays>::default(),
@@ -125,7 +123,7 @@ impl ObjectImpl for RnAppWindow {
         css.load_from_resource((String::from(config::APP_IDPATH) + "ui/style.css").as_str());
 
         let display = gdk::Display::default().unwrap();
-        StyleContext::add_provider_for_display(
+        gtk4::style_context_add_provider_for_display(
             &display,
             &css,
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
@@ -156,6 +154,9 @@ impl ObjectImpl for RnAppWindow {
                 glib::ParamSpecBoolean::builder("touch-drawing")
                     .default_value(false)
                     .build(),
+                glib::ParamSpecBoolean::builder("focus-mode")
+                    .default_value(false)
+                    .build(),
             ]
         });
         PROPERTIES.as_ref()
@@ -168,6 +169,7 @@ impl ObjectImpl for RnAppWindow {
             "righthanded" => self.righthanded.get().to_value(),
             "block-pinch-zoom" => self.block_pinch_zoom.get().to_value(),
             "touch-drawing" => self.touch_drawing.get().to_value(),
+            "focus-mode" => self.focus_mode.get().to_value(),
             _ => unimplemented!(),
         }
     }
@@ -217,6 +219,14 @@ impl ObjectImpl for RnAppWindow {
                 let touch_drawing: bool =
                     value.get().expect("The value needs to be of type `bool`");
                 self.touch_drawing.replace(touch_drawing);
+            }
+            "focus-mode" => {
+                let focus_mode: bool = value.get().expect("The value needs to be of type `bool`");
+                self.focus_mode.replace(focus_mode);
+
+                self.overlays.pens_toggles_box().set_visible(!focus_mode);
+                self.overlays.colorpicker().set_visible(!focus_mode);
+                self.overlays.sidebar_box().set_visible(!focus_mode);
             }
             _ => unimplemented!(),
         }
@@ -521,23 +531,40 @@ impl RnAppWindow {
                 .appmenu()
                 .righthanded_toggle()
                 .set_active(true);
+
             obj.workspacebrowser()
                 .grid()
                 .remove(&obj.workspacebrowser().workspacesbar());
             obj.workspacebrowser()
                 .grid()
+                .remove(&obj.workspacebrowser().corner_filler());
+            obj.workspacebrowser()
+                .grid()
+                .remove(&obj.workspacebrowser().dir_box());
+            obj.workspacebrowser()
+                .grid()
                 .remove(&obj.workspacebrowser().files_scroller());
             obj.workspacebrowser().grid().attach(
-                &obj.workspacebrowser().workspacesbar(),
+                &obj.workspacebrowser().corner_filler(),
                 0,
                 0,
                 1,
                 1,
             );
             obj.workspacebrowser().grid().attach(
+                &obj.workspacebrowser().workspacesbar(),
+                0,
+                1,
+                1,
+                1,
+            );
+            obj.workspacebrowser()
+                .grid()
+                .attach(&obj.workspacebrowser().dir_box(), 2, 0, 1, 1);
+            obj.workspacebrowser().grid().attach(
                 &obj.workspacebrowser().files_scroller(),
                 2,
-                0,
+                1,
                 1,
                 1,
             );
@@ -549,12 +576,13 @@ impl RnAppWindow {
                 .workspaces_scroller()
                 .set_window_placement(CornerType::TopRight);
 
+            obj.settings_panel()
+                .settings_scroller()
+                .set_window_placement(CornerType::TopRight);
+
             obj.overlays().sidebar_box().set_halign(Align::Start);
             obj.overlays()
                 .sidebar_scroller()
-                .set_window_placement(CornerType::TopRight);
-            obj.settings_panel()
-                .settings_scroller()
                 .set_window_placement(CornerType::TopRight);
             obj.overlays()
                 .penssidebar()
@@ -609,15 +637,32 @@ impl RnAppWindow {
                 .appmenu()
                 .lefthanded_toggle()
                 .set_active(true);
+
             obj.workspacebrowser()
                 .grid()
                 .remove(&obj.workspacebrowser().files_scroller());
             obj.workspacebrowser()
                 .grid()
+                .remove(&obj.workspacebrowser().dir_box());
+            obj.workspacebrowser()
+                .grid()
+                .remove(&obj.workspacebrowser().corner_filler());
+            obj.workspacebrowser()
+                .grid()
                 .remove(&obj.workspacebrowser().workspacesbar());
+            obj.workspacebrowser()
+                .grid()
+                .attach(&obj.workspacebrowser().dir_box(), 0, 0, 1, 1);
             obj.workspacebrowser().grid().attach(
                 &obj.workspacebrowser().files_scroller(),
                 0,
+                1,
+                1,
+                1,
+            );
+            obj.workspacebrowser().grid().attach(
+                &obj.workspacebrowser().corner_filler(),
+                2,
                 0,
                 1,
                 1,
@@ -625,7 +670,7 @@ impl RnAppWindow {
             obj.workspacebrowser().grid().attach(
                 &obj.workspacebrowser().workspacesbar(),
                 2,
-                0,
+                1,
                 1,
                 1,
             );
@@ -637,12 +682,13 @@ impl RnAppWindow {
                 .workspaces_scroller()
                 .set_window_placement(CornerType::TopLeft);
 
+            obj.settings_panel()
+                .settings_scroller()
+                .set_window_placement(CornerType::TopLeft);
+
             obj.overlays().sidebar_box().set_halign(Align::End);
             obj.overlays()
                 .sidebar_scroller()
-                .set_window_placement(CornerType::TopLeft);
-            obj.settings_panel()
-                .settings_scroller()
                 .set_window_placement(CornerType::TopLeft);
             obj.overlays()
                 .penssidebar()

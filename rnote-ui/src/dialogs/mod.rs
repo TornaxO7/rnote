@@ -1,20 +1,23 @@
+// gtk4::Dialog is deprecated, but the replacement adw::ToolbarView is not yet stable
+#![allow(deprecated)]
+
+// Modules
 pub(crate) mod export;
 pub(crate) mod import;
 
-use adw::prelude::*;
-use gettextrs::{gettext, pgettext};
-use gtk4::CheckButton;
-use gtk4::{
-    gio, glib, glib::clone, Builder, Button, ColorButton, Dialog, FileChooserAction,
-    FileChooserNative, Label, MenuButton, ResponseType, ShortcutsWindow, StringList,
-};
-
+// Imports
 use crate::appwindow::RnAppWindow;
 use crate::canvas::RnCanvas;
 use crate::canvaswrapper::RnCanvasWrapper;
 use crate::config;
 use crate::workspacebrowser::workspacesbar::RnWorkspaceRow;
 use crate::{globals, RnIconPicker};
+use adw::prelude::*;
+use gettextrs::{gettext, pgettext};
+use gtk4::{
+    gio, glib, glib::clone, Builder, Button, CheckButton, ColorDialogButton, Dialog, FileDialog,
+    Label, MenuButton, ResponseType, ShortcutsWindow, StringList,
+};
 
 // About Dialog
 pub(crate) fn dialog_about(appwindow: &RnAppWindow) {
@@ -50,48 +53,40 @@ pub(crate) fn dialog_about(appwindow: &RnAppWindow) {
         aboutdialog.add_css_class("devel");
     }
 
-    aboutdialog.show();
+    aboutdialog.present();
 }
 
 pub(crate) fn dialog_keyboard_shortcuts(appwindow: &RnAppWindow) {
     let builder =
         Builder::from_resource((String::from(config::APP_IDPATH) + "ui/shortcuts.ui").as_str());
-    let dialog_shortcuts: ShortcutsWindow = builder.object("shortcuts_window").unwrap();
-
-    if config::PROFILE == "devel" {
-        dialog_shortcuts.add_css_class("devel");
-    }
-
-    dialog_shortcuts.set_transient_for(Some(appwindow));
-    dialog_shortcuts.show();
+    let dialog: ShortcutsWindow = builder.object("shortcuts_window").unwrap();
+    dialog.set_transient_for(Some(appwindow));
+    dialog.present();
 }
 
 pub(crate) fn dialog_clear_doc(appwindow: &RnAppWindow, canvas: &RnCanvas) {
     let builder = Builder::from_resource(
         (String::from(config::APP_IDPATH) + "ui/dialogs/dialogs.ui").as_str(),
     );
-    let dialog_clear_doc: adw::MessageDialog = builder.object("dialog_clear_doc").unwrap();
+    let dialog: adw::MessageDialog = builder.object("dialog_clear_doc").unwrap();
+    dialog.set_transient_for(Some(appwindow));
 
-    dialog_clear_doc.set_transient_for(Some(appwindow));
-
-    dialog_clear_doc.connect_response(
+    dialog.connect_response(
         None,
         clone!(@weak canvas, @weak appwindow => move |_dialog_clear_doc, response| {
             match response {
                 "clear" => {
                     let prev_empty = canvas.empty();
 
-                    let widget_flags = canvas.engine().borrow_mut().clear();
-                    appwindow.handle_widget_flags(widget_flags, &canvas);
-
+                    let mut widget_flags = canvas.engine().borrow_mut().clear();
                     canvas.return_to_origin_page();
-                    canvas.engine().borrow_mut().resize_autoexpand();
-
+                    widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
                     if !prev_empty {
                         canvas.set_unsaved_changes(true);
                     }
                     canvas.set_empty(true);
-                    canvas.update_engine_rendering();
+                    canvas.update_rendering_current_viewport();
+                    appwindow.handle_widget_flags(widget_flags, &canvas);
                 },
                 _ => {
                 // Cancel
@@ -100,21 +95,19 @@ pub(crate) fn dialog_clear_doc(appwindow: &RnAppWindow, canvas: &RnCanvas) {
         }),
     );
 
-    dialog_clear_doc.show();
+    dialog.present();
 }
 
 pub(crate) fn dialog_new_doc(appwindow: &RnAppWindow, canvas: &RnCanvas) {
     let new_doc = |appwindow: &RnAppWindow, canvas: &RnCanvas| {
-        let widget_flags = canvas.engine().borrow_mut().clear();
-        appwindow.handle_widget_flags(widget_flags, canvas);
-
+        let mut widget_flags = canvas.engine().borrow_mut().clear();
         canvas.return_to_origin_page();
-        canvas.engine().borrow_mut().resize_autoexpand();
-        canvas.update_engine_rendering();
-
+        widget_flags.merge(canvas.engine().borrow_mut().doc_resize_autoexpand());
+        canvas.update_rendering_current_viewport();
         canvas.set_unsaved_changes(false);
         canvas.set_empty(true);
         canvas.set_output_file(None);
+        appwindow.handle_widget_flags(widget_flags, canvas);
     };
 
     if !canvas.unsaved_changes() {
@@ -156,7 +149,7 @@ pub(crate) fn dialog_new_doc(appwindow: &RnAppWindow, canvas: &RnCanvas) {
                         }
                     } else {
                         // Open a dialog to choose a save location
-                        export::filechooser_save_doc_as(&appwindow, &canvas);
+                        export::dialog_save_doc_as(&appwindow, &canvas).await;
                     }
                 }));
             },
@@ -167,7 +160,7 @@ pub(crate) fn dialog_new_doc(appwindow: &RnAppWindow, canvas: &RnCanvas) {
         }),
     );
 
-    dialog_new_doc.show();
+    dialog_new_doc.present();
 }
 
 /// Only to be called from the tabview close-page handler
@@ -176,24 +169,77 @@ pub(crate) fn dialog_close_tab(appwindow: &RnAppWindow, tab_page: &adw::TabPage)
         (String::from(config::APP_IDPATH) + "ui/dialogs/dialogs.ui").as_str(),
     );
     let dialog: adw::MessageDialog = builder.object("dialog_close_tab").unwrap();
-
+    let file_group: adw::PreferencesGroup = builder.object("close_tab_file_group").unwrap();
     dialog.set_transient_for(Some(appwindow));
+    let canvas = tab_page
+        .child()
+        .downcast::<RnCanvasWrapper>()
+        .unwrap()
+        .canvas();
 
+    let mut doc_title = canvas.doc_title_display();
+    let save_folder_path = if let Some(p) = canvas.output_file().and_then(|f| f.parent()?.path()) {
+        Some(p)
+    } else {
+        appwindow.workspacebrowser().dirlist_dir()
+    };
+
+    let check = CheckButton::builder().active(true).build();
+    // Lock checkbox to active state as user can discard document if they choose
+    check.set_sensitive(false);
+
+    // Handle possible file collisions
+    if let Some(save_folder_path) = save_folder_path.clone() {
+        let mut doc_file = gio::File::for_path(save_folder_path.join(doc_title.clone() + ".rnote"));
+
+        if gio::File::query_exists(&doc_file, None::<&gio::Cancellable>) {
+            let mut postfix = 0;
+            while gio::File::query_exists(&doc_file, None::<&gio::Cancellable>) {
+                postfix += 1;
+                doc_file = gio::File::for_path(
+                    save_folder_path
+                        .join(doc_title.clone() + " - " + &postfix.to_string() + ".rnote"),
+                );
+            }
+            doc_title = doc_title + " - " + &postfix.to_string();
+        }
+    }
+
+    let row = adw::ActionRow::builder()
+        .title(doc_title.clone() + ".rnote")
+        .subtitle(
+            save_folder_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| gettext("- unable to find a valid save folder -")),
+        )
+        .build();
+    row.add_prefix(&check);
+
+    if save_folder_path.is_none() {
+        // Indicate that the file cannot be saved
+        row.set_sensitive(false);
+        check.set_active(false);
+    }
+
+    file_group.add(&row);
     dialog.connect_response(
         None,
-        clone!(@weak tab_page, @weak appwindow => move |_, response| {
-            let canvas = tab_page.child().downcast::<RnCanvasWrapper>().unwrap().canvas();
-
+        clone!(@weak tab_page, @weak canvas, @weak appwindow => move |_, response| {
+            let output_folder_path = save_folder_path.clone();
+            let doc_title = doc_title.clone();
             match response {
                 "discard" => {
                     appwindow.overlays().tabview().close_page_finish(&tab_page, true);
                 },
                 "save" => {
                     glib::MainContext::default().spawn_local(clone!(@weak tab_page, @weak canvas, @weak appwindow => async move {
-                        if let Some(output_file) = canvas.output_file() {
+                        if let Some(output_folder_path) = output_folder_path {
+                            let save_file =
+                                    gio::File::for_path(output_folder_path.join(doc_title + ".rnote"));
                             appwindow.overlays().start_pulsing_progressbar();
 
-                            if let Err(e) = canvas.save_document_to_file(&output_file).await {
+                            if let Err(e) = canvas.save_document_to_file(&save_file).await {
                                 canvas.set_output_file(None);
 
                                 log::error!("saving document failed, Error: `{e:?}`");
@@ -202,11 +248,7 @@ pub(crate) fn dialog_close_tab(appwindow: &RnAppWindow, tab_page: &adw::TabPage)
 
                             appwindow.overlays().finish_progressbar();
                             // No success toast on saving without dialog, success is already indicated in the header title
-                        } else {
-                            // Open a dialog to choose a save location
-                            export::filechooser_save_doc_as(&appwindow, &canvas);
                         }
-
                         // only close if saving was successful
                         appwindow
                             .overlays()
@@ -225,7 +267,7 @@ pub(crate) fn dialog_close_tab(appwindow: &RnAppWindow, tab_page: &adw::TabPage)
         }),
     );
 
-    dialog.show();
+    dialog.present();
 }
 
 pub(crate) async fn dialog_close_window(appwindow: &RnAppWindow) {
@@ -238,54 +280,70 @@ pub(crate) async fn dialog_close_window(appwindow: &RnAppWindow) {
 
     let tabs = appwindow.tab_pages_snapshot();
     let mut rows = Vec::new();
-    let mut prev_doc_title = String::new();
-
+    let mut postfix = 0;
     for (i, tab) in tabs.iter().enumerate() {
         let canvas = tab.child().downcast::<RnCanvasWrapper>().unwrap().canvas();
 
-        if canvas.unsaved_changes() {
-            let save_folder_path = if let Some(p) =
-                canvas.output_file().and_then(|f| f.parent()?.path())
-            {
+        if !canvas.unsaved_changes() {
+            continue;
+        }
+
+        let save_folder_path =
+            if let Some(p) = canvas.output_file().and_then(|f| f.parent()?.path()) {
                 Some(p)
             } else {
-                directories::UserDirs::new().and_then(|u| u.document_dir().map(|p| p.to_path_buf()))
+                appwindow.workspacebrowser().dirlist_dir()
             };
 
-            let mut doc_title = canvas.doc_title_display();
-            // Ensuring we don't save with same file names by suffixing with a running index if it already exists
-            let mut suff_i = 1;
-            while doc_title == prev_doc_title {
-                suff_i += 1;
-                doc_title += &format!(" - {suff_i}");
-            }
-            prev_doc_title = doc_title.clone();
+        let mut doc_title = canvas.doc_title_display();
 
-            // Active by default
-            let check = CheckButton::builder().active(true).build();
-
-            let row = adw::ActionRow::builder()
-                .title(&(doc_title.clone() + ".rnote"))
-                .subtitle(
-                    &save_folder_path
-                        .as_ref()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|| gettext("- unable to find a valid save folder -")),
+        // Handle possible file collisions
+        if let Some(save_folder_path) = save_folder_path.clone() {
+            let mut doc_file = if postfix == 0 {
+                gio::File::for_path(save_folder_path.join(doc_title.clone() + ".rnote"))
+            } else {
+                gio::File::for_path(
+                    save_folder_path
+                        .join(doc_title.clone() + " - " + &postfix.to_string() + ".rnote"),
                 )
-                .build();
-
-            row.add_prefix(&check);
-
-            if save_folder_path.is_none() {
-                // Indicate that the file cannot be saved
-                check.set_active(false);
-                row.set_sensitive(false);
+            };
+            while gio::File::query_exists(&doc_file, None::<&gio::Cancellable>) {
+                postfix += 1;
+                doc_file = gio::File::for_path(
+                    save_folder_path
+                        .join(doc_title.clone() + " - " + &postfix.to_string() + ".rnote"),
+                );
             }
-
-            files_group.add(&row);
-
-            rows.push((i, check, save_folder_path, doc_title));
+            if postfix != 0 {
+                doc_title = doc_title + " - " + &postfix.to_string();
+            }
+            postfix += 1;
         }
+
+        // Active by default
+        let check = CheckButton::builder().active(true).build();
+
+        let row = adw::ActionRow::builder()
+            .title(&(doc_title.clone() + ".rnote"))
+            .subtitle(
+                &save_folder_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| gettext("- unable to find a valid save folder -")),
+            )
+            .build();
+
+        row.add_prefix(&check);
+
+        if save_folder_path.is_none() {
+            // Indicate that the file cannot be saved
+            check.set_active(false);
+            row.set_sensitive(false);
+        }
+
+        files_group.add(&row);
+
+        rows.push((i, check, save_folder_path, doc_title));
     }
 
     // TODO: as soon as libadwaita v1.3 is out, this can be replaced by choose_future()
@@ -348,10 +406,10 @@ pub(crate) async fn dialog_close_window(appwindow: &RnAppWindow) {
         }),
     );
 
-    dialog.show();
+    dialog.present();
 }
 
-pub(crate) fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
+pub(crate) async fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
     let builder = Builder::from_resource(
         (String::from(config::APP_IDPATH) + "ui/dialogs/dialogs.ui").as_str(),
     );
@@ -362,7 +420,7 @@ pub(crate) fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
     let name_entryrow: adw::EntryRow = builder
         .object("edit_selected_workspace_name_entryrow")
         .unwrap();
-    let color_button: ColorButton = builder
+    let color_button: ColorDialogButton = builder
         .object("edit_selected_workspace_color_button")
         .unwrap();
     let dir_label: Label = builder.object("edit_selected_workspace_dir_label").unwrap();
@@ -386,26 +444,13 @@ pub(crate) fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
         false,
     );
 
-    let filechooser: FileChooserNative = FileChooserNative::builder()
-        .title(gettext("Change Workspace Directory"))
-        .modal(true)
-        .transient_for(appwindow)
-        .accept_label(gettext("Select"))
-        .cancel_label(gettext("Cancel"))
-        .action(FileChooserAction::SelectFolder)
-        .select_multiple(false)
-        .build();
-
     let Some(initial_entry) = appwindow
         .workspacebrowser()
         .workspacesbar()
         .selected_workspacelistentry() else {
-            log::warn!("tried to edit workspace dialog, but no workspace was selected");
+            log::warn!("tried to edit workspace entry in dialog, but no workspace is selected");
             return;
         };
-    if let Err(e) = filechooser.set_file(&gio::File::for_path(initial_entry.dir())) {
-        log::error!("set file in change workspace dialog failed with Err: {e:?}");
-    }
 
     // set initial dialog UI on popup
     preview_row.entry().replace_data(&initial_entry);
@@ -429,38 +474,48 @@ pub(crate) fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
         }),
     );
 
-    color_button.connect_color_set(clone!(@weak preview_row => move |button| {
+    color_button.connect_rgba_notify(clone!(@weak preview_row => move |button| {
         let color = button.rgba();
         preview_row.entry().set_color(color);
     }));
 
-    filechooser.connect_response(clone!(
-        @weak preview_row,
-        @weak name_entryrow,
-        @weak dir_label,
-        @weak dialog,
-        @weak appwindow => move |filechooser, responsetype| {
-        match responsetype {
-            ResponseType::Accept => {
-                if let Some(p) = filechooser.file().and_then(|f| f.path()) {
-                    let path_string = p.to_string_lossy().to_string();
-                    dir_label.set_label(&path_string);
-                    preview_row.entry().set_dir(path_string);
+    dir_button.connect_clicked(
+        clone!(@strong preview_row, @weak dir_label, @weak name_entryrow, @weak dialog, @weak appwindow => move |_| {
+            glib::MainContext::default().spawn_local(clone!(@strong preview_row, @weak dir_label, @weak name_entryrow, @weak dialog, @weak appwindow => async move {
+                dialog.hide();
 
-                    // Update the entry row with the file name of the new selected directory
-                    if let Some(file_name) = p.file_name().map(|n| n.to_string_lossy()) {
-                        name_entryrow.set_text(&file_name);
+                let filedialog = FileDialog::builder()
+                    .title(gettext("Change Workspace Directory"))
+                    .modal(true)
+                    .accept_label(gettext("Select"))
+                    .initial_file(&gio::File::for_path(preview_row.entry().dir()))
+                    .build();
+
+                match filedialog.select_folder_future(Some(&appwindow)).await {
+                    Ok(selected_file) => {
+                        if let Some(p) = selected_file
+                            .path()
+                        {
+                            let path_string = p.to_string_lossy().to_string();
+                            dir_label.set_label(&path_string);
+                            preview_row.entry().set_dir(path_string);
+
+                            // Update the entry row with the file name of the new selected directory
+                            if let Some(file_name) = p.file_name().map(|n| n.to_string_lossy()) {
+                                name_entryrow.set_text(&file_name);
+                            }
+                        } else {
+                            dir_label.set_label(&gettext("- no directory selected -"));
+                        }
                     }
-                } else {
-                    dir_label.set_label(&gettext("- no directory selected -"));
+                    Err(e) => {
+                        log::debug!("did not select new folder for workspacerow (Error or dialog dismissed by user), {e:?}");
+                    }
                 }
-            }
-            _ => {}
-        }
-
-        filechooser.hide();
-        dialog.show();
-    }));
+                dialog.present();
+            }));
+        }),
+    );
 
     dialog.connect_response(
         clone!(@weak preview_row, @weak appwindow => move |dialog, responsetype| {
@@ -479,15 +534,7 @@ pub(crate) fn dialog_edit_selected_workspace(appwindow: &RnAppWindow) {
             dialog.close();
         }));
 
-    dir_button.connect_clicked(
-        clone!(@weak dialog, @strong filechooser, @weak appwindow => move |_| {
-            dialog.hide();
-            filechooser.show();
-        }),
-    );
-
-    dialog.show();
-    *appwindow.filechoosernative().borrow_mut() = Some(filechooser);
+    dialog.present();
 }
 
 const WORKSPACELISTENTRY_ICONS_LIST: &[&str] = &[

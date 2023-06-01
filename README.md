@@ -16,7 +16,9 @@
 
 > Sketch and take handwritten notes.  
 
-Rnote is an open-source vector-based drawing app for sketching, handwritten notes and to annotate documents and pictures. Targeted at students, teachers and those who own a drawing tablet, it provides features like PDF and picture import and export, an infinite canvas and an adaptive UI for big and small screens.
+Rnote is an open-source vector-based drawing app for sketching, handwritten notes and to annotate documents and pictures.
+It is targeted at students, teachers and those who own a drawing tablet and provides features like Pdf and picture import and export,
+an infinite canvas and an adaptive UI for big and small screens.
 
 Written in Rust and GTK4.
 
@@ -33,8 +35,8 @@ Written in Rust and GTK4.
 - Reconfigurable stylus button shortcuts
 - An integrated workspace browser for quick access to related files
 - Drag & Drop, clipboard support
-- PDF, Bitmap and SVG image import
-- Document, document pages and selection export to many formats including SVG, PDF, Xopp
+- Pdf, Bitmap and Svg image import
+- Document, document pages and selection export to many formats including Svg, Pdf, Xopp
 - Save and load the documents in the native `.rnote` file format
 - Tabs to work on multiple documents at the same time
 - Autosave, printing
@@ -54,7 +56,7 @@ Rnote has a project website: [rnote.flxzt.net](https://rnote.flxzt.net/)
 Download the official flatpak on Flathub [here](https://flathub.org/apps/details/com.github.flxzt.rnote).
 
 <div align="start">
-<a href='https://flathub.org/apps/details/com.github.flxzt.rnote'><img width="250" alt='Download on Flathub' src='https://raw.githubusercontent.com/flxzt/rnote/main/misc/assets/flathub-badge.png'/></a>
+<a href='https://flathub.org/apps/details/com.github.flxzt.rnote'><img width="250" alt='Download on Flathub' src='https://raw.githubusercontent.com/flxzt/rnote/main/misc/assets/flathub-badge.svg'/></a>
 </div><br>
 
 ### MacOS
@@ -65,6 +67,20 @@ Check out the [repository](https://gitlab.com/dehesselle/rnote_macos), the lates
 <div align="start">
 <a href='https://gitlab.com/dehesselle/rnote_macos/-/releases/permalink/latest'><img height="150" alt='Download MacOS app bundle' src='https://raw.githubusercontent.com/flxzt/rnote/main/misc/assets/rnote-macos-app-bundle-badge.png'/></a>
 </div><br>
+
+### Windows
+
+Download the Windows installer from the latest release which can be found [here](https://github.com/flxzt/rnote/releases/latest).
+
+<div align="start">
+<a href='https://github.com/flxzt/rnote/releases/latest'><img width="250" alt='Download Windows installer' src='https://raw.githubusercontent.com/flxzt/rnote/main/misc/assets/windows-installer-badge.svg'/></a>
+</div><br>
+
+Install using winget:
+
+```
+winget install rnote
+```
 
 ### Downgrading
 
@@ -89,7 +105,7 @@ $ flatpak mask com.github.flxzt.rnote
 $ flatpak mask --remove com.github.flxzt.rnote
 ```
 
-To update to the lastest version again, unpin and run `flatpak update`.
+To update to the latest version again, unpin and run `flatpak update`.
 
 ## Screenshots
 

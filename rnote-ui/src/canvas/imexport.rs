@@ -1,14 +1,13 @@
-use std::ops::Range;
-use std::path::Path;
-
+// Imports
+use super::RnCanvas;
 use futures::channel::oneshot;
 use gtk4::{gio, prelude::*};
 use rnote_compose::helpers::Vector2Helpers;
 use rnote_engine::engine::export::{DocExportPrefs, DocPagesExportPrefs, SelectionExportPrefs};
 use rnote_engine::engine::{EngineSnapshot, StrokeContent};
 use rnote_engine::strokes::Stroke;
-
-use super::RnCanvas;
+use std::ops::Range;
+use std::path::Path;
 
 impl RnCanvas {
     pub(crate) async fn load_in_rnote_bytes<P>(
@@ -32,10 +31,9 @@ impl RnCanvas {
         self.set_unsaved_changes(false);
         self.set_empty(false);
         self.return_to_origin_page();
-
-        self.regenerate_background_pattern();
-        self.engine().borrow_mut().resize_autoexpand();
-        self.update_engine_rendering();
+        self.background_regenerate_pattern();
+        widget_flags.merge(self.engine().borrow_mut().doc_resize_autoexpand());
+        self.update_rendering_current_viewport();
 
         widget_flags.refresh_ui = true;
 
@@ -61,13 +59,17 @@ impl RnCanvas {
         target_pos: Option<na::Vector2<f64>>,
     ) -> anyhow::Result<()> {
         let pos = target_pos.unwrap_or_else(|| {
-            (self.engine().borrow().camera.transform().inverse()
-                * na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
-            .coords
-            .maxs(&na::vector![
-                self.engine().borrow().document.x,
-                self.engine().borrow().document.y
-            ])
+            self.engine()
+                .borrow()
+                .camera
+                .transform()
+                .inverse()
+                .transform_point(&na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
+                .coords
+                .maxs(&na::vector![
+                    self.engine().borrow().document.x,
+                    self.engine().borrow().document.y
+                ])
         });
 
         // we need the split the import operation between generate_vectorimage_from_bytes() which returns a receiver and import_generated_strokes(),
@@ -95,13 +97,17 @@ impl RnCanvas {
         target_pos: Option<na::Vector2<f64>>,
     ) -> anyhow::Result<()> {
         let pos = target_pos.unwrap_or_else(|| {
-            (self.engine().borrow().camera.transform().inverse()
-                * na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
-            .coords
-            .maxs(&na::vector![
-                self.engine().borrow().document.x,
-                self.engine().borrow().document.y
-            ])
+            self.engine()
+                .borrow()
+                .camera
+                .transform()
+                .inverse()
+                .transform_point(&na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
+                .coords
+                .maxs(&na::vector![
+                    self.engine().borrow().document.x,
+                    self.engine().borrow().document.y
+                ])
         });
 
         let bitmapimage_receiver = self
@@ -131,9 +137,9 @@ impl RnCanvas {
         self.set_unsaved_changes(true);
         self.set_empty(false);
         self.return_to_origin_page();
-        self.regenerate_background_pattern();
-        self.engine().borrow_mut().resize_autoexpand();
-        self.update_engine_rendering();
+        self.background_regenerate_pattern();
+        widget_flags.merge(self.engine().borrow_mut().doc_resize_autoexpand());
+        self.update_rendering_current_viewport();
 
         widget_flags.refresh_ui = true;
 
@@ -149,13 +155,17 @@ impl RnCanvas {
         page_range: Option<Range<u32>>,
     ) -> anyhow::Result<()> {
         let pos = target_pos.unwrap_or_else(|| {
-            (self.engine().borrow().camera.transform().inverse()
-                * na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
-            .coords
-            .maxs(&na::vector![
-                self.engine().borrow().document.x,
-                self.engine().borrow().document.y
-            ])
+            self.engine()
+                .borrow()
+                .camera
+                .transform()
+                .inverse()
+                .transform_point(&na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
+                .coords
+                .maxs(&na::vector![
+                    self.engine().borrow().document.x,
+                    self.engine().borrow().document.y
+                ])
         });
 
         let strokes_receiver = self
@@ -177,13 +187,17 @@ impl RnCanvas {
         target_pos: Option<na::Vector2<f64>>,
     ) -> anyhow::Result<()> {
         let pos = target_pos.unwrap_or_else(|| {
-            (self.engine().borrow().camera.transform().inverse()
-                * na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
-            .coords
-            .maxs(&na::vector![
-                self.engine().borrow().document.x,
-                self.engine().borrow().document.y
-            ])
+            self.engine()
+                .borrow()
+                .camera
+                .transform()
+                .inverse()
+                .transform_point(&na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
+                .coords
+                .maxs(&na::vector![
+                    self.engine().borrow().document.x,
+                    self.engine().borrow().document.y
+                ])
         });
 
         let widget_flags = self.engine().borrow_mut().insert_text(text, pos)?;
@@ -206,13 +220,18 @@ impl RnCanvas {
             }
         });
         let content = oneshot_receiver.await??;
-        let pos = (self.engine().borrow().camera.transform().inverse()
-            * na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
-        .coords
-        .maxs(&na::vector![
-            self.engine().borrow().document.x,
-            self.engine().borrow().document.y
-        ]);
+        let pos = self
+            .engine()
+            .borrow()
+            .camera
+            .transform()
+            .inverse()
+            .transform_point(&na::Point2::from(Stroke::IMPORT_OFFSET_DEFAULT))
+            .coords
+            .maxs(&na::vector![
+                self.engine().borrow().document.x,
+                self.engine().borrow().document.y
+            ]);
 
         let widget_flags = self
             .engine()

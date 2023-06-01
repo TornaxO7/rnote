@@ -1,9 +1,10 @@
+// Modules
 mod smoothoptions;
 
-use kurbo::Shape;
 // Re-exports
 pub use smoothoptions::SmoothOptions;
 
+// Imports
 use super::Composer;
 use crate::helpers::Vector2Helpers;
 use crate::penpath::{self, Segment};
@@ -14,7 +15,7 @@ use crate::shapes::Rectangle;
 use crate::shapes::ShapeBehaviour;
 use crate::shapes::{Arrow, CubicBezier};
 use crate::PenPath;
-
+use kurbo::Shape;
 use p2d::bounding_volume::{Aabb, BoundingVolume};
 
 impl Composer<SmoothOptions> for Line {
@@ -149,10 +150,20 @@ impl Composer<SmoothOptions> for PenPath {
     }
 
     fn draw_composed(&self, cx: &mut impl piet::RenderContext, options: &SmoothOptions) {
+        let Some(color) = options.stroke_color else {
+            return;
+        };
         cx.save().unwrap();
-
+        let mut single_pos = true;
         let mut prev = self.start;
+
         for seg in self.segments.iter() {
+            if seg.end().pos == self.start.pos {
+                continue;
+            } else {
+                single_pos = false;
+            }
+
             let bez_path = {
                 match seg {
                     Segment::LineTo { end } => {
@@ -234,14 +245,22 @@ impl Composer<SmoothOptions> for PenPath {
                 }
             };
 
-            if let Some(fill_color) = options.stroke_color {
-                // Outlines for debugging
-                //let stroke_brush = cx.solid_brush(piet::Color::RED);
-                //cx.stroke(bez_path.clone(), &stroke_brush, 0.2);
+            // Outlines for debugging
+            //let stroke_brush = cx.solid_brush(piet::Color::RED);
+            //cx.stroke(bez_path.clone(), &stroke_brush, 0.2);
 
-                let fill_brush = cx.solid_brush(fill_color.into());
-                cx.fill(bez_path, &fill_brush);
-            }
+            cx.fill(bez_path, &Into::<piet::Color>::into(color));
+        }
+
+        // Single element/position strokes need special treatment to be rendered
+        if self.segments.is_empty() || single_pos {
+            let start_width = options
+                .pressure_curve
+                .apply(options.stroke_width, self.start.pressure);
+            cx.fill(
+                kurbo::Circle::new(self.start.pos.to_kurbo_point(), start_width * 0.5),
+                &Into::<piet::Color>::into(color),
+            );
         }
 
         cx.restore().unwrap();
@@ -272,7 +291,7 @@ impl Composer<SmoothOptions> for crate::Shape {
     }
 }
 
-// Composes lines with variable width. Must be drawn with only a fill
+/// Composes lines with variable width. Must be drawn with only a fill.
 fn compose_lines_variable_width(
     lines: &[Line],
     start_width: f64,

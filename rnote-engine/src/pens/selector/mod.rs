@@ -1,25 +1,25 @@
+// Modules
 mod penevents;
 
-use std::time::Instant;
-
+// Imports
 use super::penbehaviour::{PenBehaviour, PenProgress};
 use super::pensconfig::selectorconfig::SelectorStyle;
 use super::PenStyle;
 use crate::engine::{EngineView, EngineViewMut, RNOTE_STROKE_CONTENT_MIME_TYPE};
 use crate::store::StrokeKey;
+use crate::strokes::StrokeBehaviour;
 use crate::{Camera, DrawOnDocBehaviour, WidgetFlags};
 use kurbo::Shape;
 use once_cell::sync::Lazy;
+use p2d::bounding_volume::{Aabb, BoundingSphere, BoundingVolume};
 use p2d::query::PointQuery;
 use piet::RenderContext;
 use rnote_compose::helpers::{AabbHelpers, Vector2Helpers};
 use rnote_compose::penevents::{ModifierKey, PenEvent, PenState};
 use rnote_compose::penpath::Element;
-use rnote_compose::shapes::ShapeBehaviour;
 use rnote_compose::style::indicators;
 use rnote_compose::{color, Color};
-
-use p2d::bounding_volume::{Aabb, BoundingSphere, BoundingVolume};
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum ResizeCorner {
@@ -88,6 +88,14 @@ impl Default for Selector {
 }
 
 impl PenBehaviour for Selector {
+    fn init(&mut self, _engine_view: &EngineView) -> WidgetFlags {
+        WidgetFlags::default()
+    }
+
+    fn deinit(&mut self) -> WidgetFlags {
+        WidgetFlags::default()
+    }
+
     fn style(&self) -> PenStyle {
         PenStyle::Selector
     }
@@ -97,19 +105,18 @@ impl PenBehaviour for Selector {
 
         let selection = engine_view.store.selection_keys_as_rendered();
 
-        if let Some(selection_bounds) = engine_view.store.bounds_for_strokes(&selection) {
-            self.state = SelectorState::ModifySelection {
-                modify_state: ModifyState::default(),
-                selection,
-                selection_bounds,
+        self.state =
+            if let Some(selection_bounds) = engine_view.store.bounds_for_strokes(&selection) {
+                SelectorState::ModifySelection {
+                    modify_state: ModifyState::default(),
+                    selection,
+                    selection_bounds,
+                }
+            } else {
+                SelectorState::Idle
             };
 
-            widget_flags.redraw = true;
-        } else {
-            self.state = SelectorState::Idle;
-
-            widget_flags.redraw = true;
-        }
+        widget_flags.redraw = true;
 
         widget_flags
     }
@@ -120,8 +127,6 @@ impl PenBehaviour for Selector {
         now: Instant,
         engine_view: &mut EngineViewMut,
     ) -> (PenProgress, WidgetFlags) {
-        //log::debug!("selector state: {:?}, event: {:?}", &self.state, &event);
-
         match event {
             PenEvent::Down {
                 element,
@@ -175,7 +180,7 @@ impl PenBehaviour for Selector {
         &mut self,
         engine_view: &mut EngineViewMut,
     ) -> anyhow::Result<(Option<(Vec<u8>, String)>, WidgetFlags)> {
-        let mut widget_flags = engine_view.store.record(Instant::now());
+        let mut widget_flags = WidgetFlags::default();
 
         let selected_keys = if let SelectorState::ModifySelection { selection, .. } = &self.state {
             Some(selection.clone())
@@ -185,10 +190,12 @@ impl PenBehaviour for Selector {
 
         if let Some(selected_keys) = selected_keys {
             let clipboard_content = engine_view.store.cut_stroke_content(&selected_keys);
-            widget_flags.store_modified = true;
-            widget_flags.redraw = true;
 
             self.state = SelectorState::Idle;
+
+            widget_flags.merge(engine_view.store.record(Instant::now()));
+            widget_flags.store_modified = true;
+            widget_flags.redraw = true;
 
             return Ok((
                 Some((
@@ -214,19 +221,19 @@ impl DrawOnDocBehaviour for Selector {
                 let mut path_iter = path.iter();
                 if let Some(first) = path_iter.next() {
                     let mut new_bounds = Aabb::from_half_extents(
-                        na::Point2::from(first.pos),
-                        na::Vector2::repeat(Self::SELECTION_OUTLINE_WIDTH / total_zoom),
+                        first.pos.into(),
+                        na::Vector2::repeat(Self::OUTLINE_STROKE_WIDTH / total_zoom),
                     );
 
                     path_iter.for_each(|element| {
                         let pos_bounds = Aabb::from_half_extents(
-                            na::Point2::from(element.pos),
-                            na::Vector2::repeat(Self::SELECTION_OUTLINE_WIDTH / total_zoom),
+                            element.pos.into(),
+                            na::Vector2::repeat(Self::OUTLINE_STROKE_WIDTH / total_zoom),
                         );
                         new_bounds.merge(&pos_bounds);
                     });
 
-                    Some(new_bounds.loosened(Self::SINGLE_SELECTING_CIRCLE_RADIUS / total_zoom))
+                    Some(new_bounds.loosened(Self::SELECTING_SINGLE_CIRCLE_RADIUS / total_zoom))
                 } else {
                     None
                 }
@@ -273,8 +280,8 @@ impl DrawOnDocBehaviour for Selector {
                             cx.fill(bez_path.clone(), &*SELECTION_FILL_COLOR);
                             cx.stroke_styled(
                                 bez_path,
-                                &*OUTLINE_COLOR,
-                                Self::SELECTION_OUTLINE_WIDTH / total_zoom,
+                                &*SELECTION_OUTLINE_COLOR,
+                                Self::OUTLINE_STROKE_WIDTH / total_zoom,
                                 &stroke_style,
                             );
                         }
@@ -297,8 +304,8 @@ impl DrawOnDocBehaviour for Selector {
                             cx.fill(select_rect, &*SELECTION_FILL_COLOR);
                             cx.stroke_styled(
                                 select_rect,
-                                &*OUTLINE_COLOR,
-                                Self::SELECTION_OUTLINE_WIDTH / total_zoom,
+                                &*SELECTION_OUTLINE_COLOR,
+                                Self::OUTLINE_STROKE_WIDTH / total_zoom,
                                 &stroke_style,
                             );
                         }
@@ -308,10 +315,10 @@ impl DrawOnDocBehaviour for Selector {
                             cx.stroke(
                                 kurbo::Circle::new(
                                     last.pos.to_kurbo_point(),
-                                    Self::SINGLE_SELECTING_CIRCLE_RADIUS / total_zoom,
+                                    Self::SELECTING_SINGLE_CIRCLE_RADIUS / total_zoom,
                                 ),
-                                &*OUTLINE_COLOR,
-                                Self::SELECTION_OUTLINE_WIDTH / total_zoom,
+                                &*SELECTION_OUTLINE_COLOR,
+                                Self::OUTLINE_STROKE_WIDTH / total_zoom,
                             );
                         }
                     }
@@ -336,8 +343,8 @@ impl DrawOnDocBehaviour for Selector {
 
                             cx.stroke_styled(
                                 bez_path,
-                                &*OUTLINE_COLOR,
-                                Self::SELECTION_OUTLINE_WIDTH / total_zoom,
+                                &*SELECTION_OUTLINE_COLOR,
+                                Self::OUTLINE_STROKE_WIDTH / total_zoom,
                                 &stroke_style,
                             );
                         }
@@ -349,16 +356,11 @@ impl DrawOnDocBehaviour for Selector {
                 selection,
                 selection_bounds,
             } => {
-                // Draw the bounds outlines for the selected strokes
-                static SELECTED_BOUNDS_COLOR: Lazy<piet::Color> =
-                    Lazy::new(|| color::GNOME_BLUES[1].with_alpha(0.376));
-
+                // Draw the highlight for the selected strokes
                 for stroke in engine_view.store.get_strokes_ref(selection) {
-                    cx.stroke(
-                        stroke.bounds().to_kurbo_rect(),
-                        &*SELECTED_BOUNDS_COLOR,
-                        Self::SELECTION_OUTLINE_WIDTH / total_zoom,
-                    );
+                    if let Err(e) = stroke.draw_highlight(cx, engine_view.camera.total_zoom()) {
+                        log::error!("failed to draw stroke highlight, Err: {e:?}");
+                    }
                 }
 
                 Self::draw_selection_overlay(
@@ -392,24 +394,27 @@ impl DrawOnDocBehaviour for Selector {
     }
 }
 
-static OUTLINE_COLOR: Lazy<piet::Color> = Lazy::new(|| color::GNOME_BRIGHTS[4].with_alpha(0.941));
+/// The outline color when drawing a selection
+static SELECTION_OUTLINE_COLOR: Lazy<piet::Color> =
+    Lazy::new(|| color::GNOME_BRIGHTS[4].with_alpha(0.941));
+/// The fill color when drawing a selection
 static SELECTION_FILL_COLOR: Lazy<piet::Color> =
     Lazy::new(|| color::GNOME_BRIGHTS[2].with_alpha(0.050));
 
 impl Selector {
-    /// The threshold where a translation is applied ( in offset magnitude, surface coords )
+    /// The threshold magnitude where above it the translation is applied. In surface coordinates.
     const TRANSLATE_MAGNITUDE_THRESHOLD: f64 = 1.414;
-    /// The threshold angle (rad) where a rotation is applied
+    /// The threshold angle (in radians) where above it the rotation is applied.
     const ROTATE_ANGLE_THRESHOLD: f64 = ((2.0 * std::f64::consts::PI) / 360.0) * 0.2;
-
-    const SELECTION_OUTLINE_WIDTH: f64 = 1.5;
+    /// The outline stroke width when drawing a selection.
+    const OUTLINE_STROKE_WIDTH: f64 = 2.0;
+    /// The dash pattern while selecting.
     const SELECTING_DASH_PATTERN: [f64; 2] = [12.0, 6.0];
-
-    const SINGLE_SELECTING_CIRCLE_RADIUS: f64 = 4.0;
-
-    /// resize node size, in surface coords
+    /// The radius of the circle when selecting in single mode.
+    const SELECTING_SINGLE_CIRCLE_RADIUS: f64 = 4.0;
+    /// Resize node size, in surface coordinates.
     const RESIZE_NODE_SIZE: na::Vector2<f64> = na::vector![18.0, 18.0];
-    /// rotate node size, in surface coords
+    /// Rotate node size, in surface coordinates.
     const ROTATE_NODE_SIZE: f64 = 18.0;
 
     fn add_to_select_path(style: SelectorStyle, path: &mut Vec<Element>, element: Element) {
@@ -472,7 +477,7 @@ impl Selector {
         let rotate_node_state = match modify_state {
             ModifyState::Rotate { .. } => PenState::Down,
             ModifyState::Hover(pos) => {
-                if rotate_node_sphere.contains_local_point(&na::Point2::from(*pos)) {
+                if rotate_node_sphere.contains_local_point(&(*pos).into()) {
                     PenState::Proximity
                 } else {
                     PenState::Up
@@ -489,7 +494,7 @@ impl Selector {
                 ..
             } => PenState::Down,
             ModifyState::Hover(pos) => {
-                if resize_tl_node_bounds.contains_local_point(&na::Point2::from(*pos)) {
+                if resize_tl_node_bounds.contains_local_point(&(*pos).into()) {
                     PenState::Proximity
                 } else {
                     PenState::Up
@@ -506,7 +511,7 @@ impl Selector {
                 ..
             } => PenState::Down,
             ModifyState::Hover(pos) => {
-                if resize_tr_node_bounds.contains_local_point(&na::Point2::from(*pos)) {
+                if resize_tr_node_bounds.contains_local_point(&(*pos).into()) {
                     PenState::Proximity
                 } else {
                     PenState::Up
@@ -523,7 +528,7 @@ impl Selector {
                 ..
             } => PenState::Down,
             ModifyState::Hover(pos) => {
-                if resize_bl_node_bounds.contains_local_point(&na::Point2::from(*pos)) {
+                if resize_bl_node_bounds.contains_local_point(&(*pos).into()) {
                     PenState::Proximity
                 } else {
                     PenState::Up
@@ -540,7 +545,7 @@ impl Selector {
                 ..
             } => PenState::Down,
             ModifyState::Hover(pos) => {
-                if resize_br_node_bounds.contains_local_point(&na::Point2::from(*pos)) {
+                if resize_br_node_bounds.contains_local_point(&(*pos).into()) {
                     PenState::Proximity
                 } else {
                     PenState::Up
@@ -596,10 +601,10 @@ impl Selector {
         // so that the inner shapes become the exterior for correct clipping
         clip_path.extend(
             kurbo::Rect::new(
-                selection_bounds.maxs[0] + Self::SELECTION_OUTLINE_WIDTH / total_zoom,
-                selection_bounds.mins[1] - Self::SELECTION_OUTLINE_WIDTH / total_zoom,
-                selection_bounds.mins[0] - Self::SELECTION_OUTLINE_WIDTH / total_zoom,
-                selection_bounds.maxs[1] + Self::SELECTION_OUTLINE_WIDTH / total_zoom,
+                selection_bounds.maxs[0] + Self::OUTLINE_STROKE_WIDTH / total_zoom,
+                selection_bounds.mins[1] - Self::OUTLINE_STROKE_WIDTH / total_zoom,
+                selection_bounds.mins[0] - Self::OUTLINE_STROKE_WIDTH / total_zoom,
+                selection_bounds.maxs[1] + Self::OUTLINE_STROKE_WIDTH / total_zoom,
             )
             .path_elements(0.1),
         );
@@ -609,8 +614,8 @@ impl Selector {
         piet_cx.fill(selection_rect, &*SELECTION_FILL_COLOR);
         piet_cx.stroke(
             selection_rect,
-            &*OUTLINE_COLOR,
-            Selector::SELECTION_OUTLINE_WIDTH / total_zoom,
+            &*SELECTION_OUTLINE_COLOR,
+            Selector::OUTLINE_STROKE_WIDTH / total_zoom,
         );
 
         piet_cx.restore().map_err(|e| anyhow::anyhow!("{e:?}"))?;
@@ -710,6 +715,11 @@ impl Selector {
 
             if let Some(new_bounds) = engine_view.store.bounds_for_strokes(&all_strokes) {
                 engine_view.store.set_selected_keys(&all_strokes, true);
+                widget_flags.merge(
+                    engine_view
+                        .doc
+                        .resize_autoexpand(engine_view.store, engine_view.camera),
+                );
 
                 self.state = SelectorState::ModifySelection {
                     modify_state: ModifyState::default(),
@@ -717,16 +727,27 @@ impl Selector {
                     selection_bounds: new_bounds,
                 };
 
-                engine_view
-                    .doc
-                    .resize_autoexpand(engine_view.store, engine_view.camera);
-
-                widget_flags.redraw = true;
-                widget_flags.resize = true;
                 widget_flags.store_modified = true;
                 widget_flags.deselect_color_setters = true;
             }
         }
         PenProgress::InProgress
     }
+}
+
+fn cancel_selection(selection: &[StrokeKey], engine_view: &mut EngineViewMut) -> WidgetFlags {
+    let mut widget_flags = WidgetFlags::default();
+    engine_view.store.set_selected_keys(selection, false);
+    engine_view.store.update_geometry_for_strokes(selection);
+    engine_view.store.regenerate_rendering_in_viewport_threaded(
+        engine_view.tasks_tx.clone(),
+        false,
+        engine_view.camera.viewport(),
+        engine_view.camera.image_scale(),
+    );
+
+    widget_flags.merge(engine_view.store.record(Instant::now()));
+    widget_flags.store_modified = true;
+    widget_flags.resize = true;
+    widget_flags
 }

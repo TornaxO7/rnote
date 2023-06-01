@@ -1,17 +1,18 @@
+// Modules
 mod element;
 mod segment;
 
-// Re exports
+// Re-exports
 pub use element::Element;
-use kurbo::Shape;
 pub use segment::Segment;
 
-use p2d::bounding_volume::{Aabb, BoundingVolume};
-use serde::{Deserialize, Serialize};
-
-use crate::helpers::KurboHelpers;
+// Imports
+use crate::helpers::{KurboHelpers, Vector2Helpers};
 use crate::shapes::{CubicBezier, Line, QuadraticBezier, ShapeBehaviour};
 use crate::transform::TransformBehaviour;
+use kurbo::Shape;
+use p2d::bounding_volume::{Aabb, BoundingVolume};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "pen_path")]
@@ -27,13 +28,13 @@ pub struct PenPath {
 
 impl ShapeBehaviour for PenPath {
     fn bounds(&self) -> Aabb {
-        let mut bounds = Aabb::from_points(&[na::Point2::from(self.start.pos)]);
+        let mut bounds = Aabb::from_points(&[self.start.pos.into()]);
 
         let mut prev = self.start;
         for seg in self.segments.iter() {
             match seg {
                 Segment::LineTo { end } => {
-                    bounds.take_point(na::Point2::from(end.pos));
+                    bounds.take_point(end.pos.into());
 
                     prev = *end;
                 }
@@ -219,6 +220,39 @@ impl PenPath {
         }
 
         hitboxes
+    }
+
+    /// Convert to [kurbo::BezPath].
+    pub fn to_kurbo(&self) -> kurbo::BezPath {
+        let elements = self.to_kurbo_el_iter();
+
+        kurbo::BezPath::from_iter(elements)
+    }
+
+    /// Convert to [kurbo::BezPath], flattened to the given precision.
+    pub fn to_kurbo_flattened(&self, tolerance: f64) -> kurbo::BezPath {
+        let elements = self.to_kurbo_el_iter();
+
+        let mut bezpath = kurbo::BezPath::new();
+        kurbo::flatten(elements, tolerance, |el| bezpath.push(el));
+
+        bezpath
+    }
+
+    fn to_kurbo_el_iter(&self) -> impl Iterator<Item = kurbo::PathEl> + '_ {
+        std::iter::once(kurbo::PathEl::MoveTo(self.start.pos.to_kurbo_point())).chain(
+            self.segments.iter().map(|s| match s {
+                Segment::LineTo { end } => kurbo::PathEl::LineTo(end.pos.to_kurbo_point()),
+                Segment::QuadBezTo { cp, end } => {
+                    kurbo::PathEl::QuadTo(cp.to_kurbo_point(), end.pos.to_kurbo_point())
+                }
+                Segment::CubBezTo { cp1, cp2, end } => kurbo::PathEl::CurveTo(
+                    cp1.to_kurbo_point(),
+                    cp2.to_kurbo_point(),
+                    end.pos.to_kurbo_point(),
+                ),
+            }),
+        )
     }
 }
 

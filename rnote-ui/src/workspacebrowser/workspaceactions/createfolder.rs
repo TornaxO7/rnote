@@ -1,18 +1,17 @@
-use std::path::PathBuf;
-
+// Imports
+use crate::{workspacebrowser::widgethelper, RnWorkspaceBrowser};
 use gettextrs::gettext;
 use gtk4::{
     gio, glib,
     glib::clone,
     pango,
     prelude::*,
-    traits::{BoxExt, ButtonExt, EditableExt, PopoverExt, StyleContextExt, WidgetExt},
+    traits::{BoxExt, ButtonExt, EditableExt, PopoverExt, WidgetExt},
     Align, Button, Entry, Label, Popover,
 };
+use std::path::PathBuf;
 
-use crate::{workspacebrowser::widgethelper, RnWorkspaceBrowser};
-
-/// Creates a new `create_folder` action
+/// Create a new `create_folder` action.
 pub(crate) fn create_folder(workspacebrowser: &RnWorkspaceBrowser) -> gio::SimpleAction {
     let new_folder_action = gio::SimpleAction::new("create-folder", None);
 
@@ -66,8 +65,7 @@ fn create_dialog_title_label() -> Label {
         .width_chars(24)
         .ellipsize(pango::EllipsizeMode::End)
         .build();
-    label.style_context().add_class("title-4");
-
+    label.add_css_class("title-4");
     label
 }
 

@@ -1,3 +1,4 @@
+// Modules
 mod penshortcutmodels;
 mod penshortcutrow;
 
@@ -5,10 +6,11 @@ mod penshortcutrow;
 pub(crate) use penshortcutrow::RnPenShortcutRow;
 
 // Imports
+use crate::{RnAppWindow, RnCanvasWrapper, RnIconPicker, RnUnitEntry};
 use adw::prelude::*;
 use gettextrs::gettext;
 use gtk4::{
-    gdk, glib, glib::clone, subclass::prelude::*, Adjustment, Button, ColorButton,
+    gdk, glib, glib::clone, subclass::prelude::*, Adjustment, Button, ColorDialogButton,
     CompositeTemplate, MenuButton, ScrolledWindow, SpinButton, StringList, Switch, ToggleButton,
     Widget,
 };
@@ -19,8 +21,6 @@ use rnote_engine::document::format::{self, Format, PredefinedFormat};
 use rnote_engine::utils::GdkRGBAHelpers;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use crate::{RnAppWindow, RnCanvasWrapper, RnIconPicker, RnUnitEntry};
 
 mod imp {
     use super::*;
@@ -39,13 +39,15 @@ mod imp {
         #[template_child]
         pub(crate) general_autosave_interval_secs_spinbutton: TemplateChild<SpinButton>,
         #[template_child]
-        pub(crate) general_format_border_color_choosebutton: TemplateChild<ColorButton>,
-        #[template_child]
         pub(crate) general_show_scrollbars_switch: TemplateChild<Switch>,
         #[template_child]
         pub(crate) general_regular_cursor_picker: TemplateChild<RnIconPicker>,
         #[template_child]
         pub(crate) general_regular_cursor_picker_menubutton: TemplateChild<MenuButton>,
+        #[template_child]
+        pub(crate) general_show_drawing_cursor_switch: TemplateChild<Switch>,
+        #[template_child]
+        pub(crate) general_drawing_cursor_picker_row: TemplateChild<adw::ActionRow>,
         #[template_child]
         pub(crate) general_drawing_cursor_picker: TemplateChild<RnIconPicker>,
         #[template_child]
@@ -75,15 +77,17 @@ mod imp {
         #[template_child]
         pub(crate) format_apply_button: TemplateChild<Button>,
         #[template_child]
-        pub(crate) background_color_choosebutton: TemplateChild<ColorButton>,
+        pub(crate) doc_format_border_color_button: TemplateChild<ColorDialogButton>,
         #[template_child]
-        pub(crate) background_patterns_row: TemplateChild<adw::ComboRow>,
+        pub(crate) doc_background_color_button: TemplateChild<ColorDialogButton>,
         #[template_child]
-        pub(crate) background_pattern_color_choosebutton: TemplateChild<ColorButton>,
+        pub(crate) doc_background_patterns_row: TemplateChild<adw::ComboRow>,
         #[template_child]
-        pub(crate) background_pattern_width_unitentry: TemplateChild<RnUnitEntry>,
+        pub(crate) doc_background_pattern_color_button: TemplateChild<ColorDialogButton>,
         #[template_child]
-        pub(crate) background_pattern_height_unitentry: TemplateChild<RnUnitEntry>,
+        pub(crate) doc_background_pattern_width_unitentry: TemplateChild<RnUnitEntry>,
+        #[template_child]
+        pub(crate) doc_background_pattern_height_unitentry: TemplateChild<RnUnitEntry>,
         #[template_child]
         pub(crate) penshortcut_stylus_button_primary_row: TemplateChild<RnPenShortcutRow>,
         #[template_child]
@@ -180,7 +184,7 @@ mod imp {
         pub(crate) fn update_temporary_format_from_ui(&self) {
             // border color
             self.temporary_format.borrow_mut().border_color = self
-                .general_format_border_color_choosebutton
+                .doc_format_border_color_button
                 .rgba()
                 .into_compose_color();
 
@@ -315,14 +319,14 @@ impl RnSettingsPanel {
     }
 
     pub(crate) fn background_pattern(&self) -> PatternStyle {
-        PatternStyle::try_from(self.imp().background_patterns_row.get().selected()).unwrap()
+        PatternStyle::try_from(self.imp().doc_background_patterns_row.get().selected()).unwrap()
     }
 
     pub(crate) fn set_background_pattern(&self, pattern: PatternStyle) {
         let position = pattern.to_u32().unwrap();
 
         self.imp()
-            .background_patterns_row
+            .doc_background_patterns_row
             .get()
             .set_selected(position);
     }
@@ -347,6 +351,10 @@ impl RnSettingsPanel {
         self.imp().general_regular_cursor_picker.clone()
     }
 
+    pub(crate) fn general_show_drawing_cursor_switch(&self) -> Switch {
+        self.imp().general_show_drawing_cursor_switch.clone()
+    }
+
     pub(crate) fn general_drawing_cursor_picker(&self) -> RnIconPicker {
         self.imp().general_drawing_cursor_picker.clone()
     }
@@ -358,7 +366,7 @@ impl RnSettingsPanel {
     pub(crate) fn refresh_ui(&self, active_tab: &RnCanvasWrapper) {
         self.refresh_general_ui(active_tab);
         self.refresh_format_ui(active_tab);
-        self.refresh_background_ui(active_tab);
+        self.refresh_doc_ui(active_tab);
         self.refresh_shortcuts_ui(active_tab);
     }
 
@@ -368,7 +376,7 @@ impl RnSettingsPanel {
 
         let format_border_color = canvas.engine().borrow().document.format.border_color;
 
-        imp.general_format_border_color_choosebutton
+        imp.doc_format_border_color_button
             .set_rgba(&gdk::RGBA::from_compose_color(format_border_color));
     }
 
@@ -387,22 +395,24 @@ impl RnSettingsPanel {
         imp.format_height_unitentry.set_value_in_px(format.height);
     }
 
-    fn refresh_background_ui(&self, active_tab: &RnCanvasWrapper) {
+    fn refresh_doc_ui(&self, active_tab: &RnCanvasWrapper) {
         let imp = self.imp();
         let canvas = active_tab.canvas();
         let background = canvas.engine().borrow().document.background;
         let format = canvas.engine().borrow().document.format;
 
-        imp.background_color_choosebutton
+        imp.doc_background_color_button
             .set_rgba(&gdk::RGBA::from_compose_color(background.color));
         self.set_background_pattern(background.pattern);
-        imp.background_pattern_color_choosebutton
+        imp.doc_background_pattern_color_button
             .set_rgba(&gdk::RGBA::from_compose_color(background.pattern_color));
-        imp.background_pattern_width_unitentry.set_dpi(format.dpi);
-        imp.background_pattern_width_unitentry
+        imp.doc_background_pattern_width_unitentry
+            .set_dpi(format.dpi);
+        imp.doc_background_pattern_width_unitentry
             .set_value_in_px(background.pattern_size[0]);
-        imp.background_pattern_height_unitentry.set_dpi(format.dpi);
-        imp.background_pattern_height_unitentry
+        imp.doc_background_pattern_height_unitentry
+            .set_dpi(format.dpi);
+        imp.doc_background_pattern_height_unitentry
             .set_value_in_px(background.pattern_size[1]);
     }
 
@@ -448,7 +458,7 @@ impl RnSettingsPanel {
     pub(crate) fn init(&self, appwindow: &RnAppWindow) {
         self.setup_general(appwindow);
         self.setup_format(appwindow);
-        self.setup_background(appwindow);
+        self.setup_doc(appwindow);
         self.setup_shortcuts(appwindow);
     }
 
@@ -518,6 +528,16 @@ impl RnSettingsPanel {
             .sync_create()
             .build();
 
+        // insensitive picker when drawing cursor is hidden
+        imp.general_show_drawing_cursor_switch
+            .bind_property(
+                "active",
+                &*imp.general_drawing_cursor_picker_row,
+                "sensitive",
+            )
+            .sync_create()
+            .build();
+
         // Drawing cursor picker
         imp.general_drawing_cursor_picker.set_list(
             StringList::new(CURSORS_LIST),
@@ -548,43 +568,45 @@ impl RnSettingsPanel {
 
         // Apply format
         imp.format_apply_button.get().connect_clicked(
-            clone!(@weak temporary_format, @weak self as settingspanel, @weak appwindow => move |_format_apply_button| {
+            clone!(@weak temporary_format, @weak self as settingspanel, @weak appwindow => move |_| {
                 let imp = settingspanel.imp();
                 let temporary_format = *temporary_format.borrow();
                 let canvas = appwindow.active_tab().canvas();
 
                 canvas.engine().borrow_mut().document.format = temporary_format;
-                canvas.engine().borrow_mut().resize_to_fit_strokes();
-                canvas.update_engine_rendering();
+                let widget_flags = canvas.engine().borrow_mut().doc_resize_to_fit_strokes();
+                canvas.update_rendering_current_viewport();
+                appwindow.handle_widget_flags(widget_flags, &canvas);
 
-                imp.background_pattern_width_unitentry.set_dpi_keep_value(temporary_format.dpi);
-                imp.background_pattern_height_unitentry.set_dpi_keep_value(temporary_format.dpi);
+                imp.doc_background_pattern_width_unitentry.set_dpi_keep_value(temporary_format.dpi);
+                imp.doc_background_pattern_height_unitentry.set_dpi_keep_value(temporary_format.dpi);
             }),
         );
+    }
 
-        imp.general_format_border_color_choosebutton.connect_color_set(clone!(@weak self as settingspanel, @weak appwindow => move |general_format_border_color_choosebutton| {
-            let format_border_color = general_format_border_color_choosebutton.rgba().into_compose_color();
+    fn setup_doc(&self, appwindow: &RnAppWindow) {
+        let imp = self.imp();
+
+        imp.doc_format_border_color_button.connect_rgba_notify(clone!(@weak self as settingspanel, @weak appwindow => move |button| {
+            let format_border_color = button.rgba().into_compose_color();
             let canvas = appwindow.active_tab().canvas();
 
             canvas.engine().borrow_mut().document.format.border_color = format_border_color;
-            // Because the format border color is applied immediately to the engine, we need to update the temporary format too.
+            // Because the format border color is applied immediately to the engine,
+            // we need to update the temporary format too.
             settingspanel.imp().temporary_format.borrow_mut().border_color = format_border_color;
-            canvas.update_engine_rendering();
+            canvas.update_rendering_current_viewport();
         }));
-    }
 
-    fn setup_background(&self, appwindow: &RnAppWindow) {
-        let imp = self.imp();
-
-        imp.background_color_choosebutton.connect_color_set(clone!(@weak appwindow => move |background_color_choosebutton| {
+        imp.doc_background_color_button.connect_rgba_notify(clone!(@weak appwindow => move |button| {
             let canvas = appwindow.active_tab().canvas();
 
-            canvas.engine().borrow_mut().document.background.color = background_color_choosebutton.rgba().into_compose_color();
-            canvas.regenerate_background_pattern();
-            canvas.update_engine_rendering();
+            canvas.engine().borrow_mut().document.background.color = button.rgba().into_compose_color();
+            canvas.background_regenerate_pattern();
+            canvas.update_rendering_current_viewport();
         }));
 
-        imp.background_patterns_row.get().connect_selected_item_notify(clone!(@weak self as settings_panel, @weak appwindow => move |_background_patterns_row| {
+        imp.doc_background_patterns_row.get().connect_selected_item_notify(clone!(@weak self as settings_panel, @weak appwindow => move |_| {
             let pattern = settings_panel.background_pattern();
             let canvas = appwindow.active_tab().canvas();
 
@@ -592,44 +614,44 @@ impl RnSettingsPanel {
 
             match pattern {
                 PatternStyle::None => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(false);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(false);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(false);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(false);
                 },
                 PatternStyle::Lines => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(false);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(false);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(true);
                 },
                 PatternStyle::Grid => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(true);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(true);
                 },
                 PatternStyle::Dots => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(true);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(true);
                 },
                 PatternStyle::IsometricGrid => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(false);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(false);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(true);
                 },
                 PatternStyle::IsometricDots => {
-                    settings_panel.imp().background_pattern_width_unitentry.set_sensitive(false);
-                    settings_panel.imp().background_pattern_height_unitentry.set_sensitive(true);
+                    settings_panel.imp().doc_background_pattern_width_unitentry.set_sensitive(false);
+                    settings_panel.imp().doc_background_pattern_height_unitentry.set_sensitive(true);
                 },
             }
 
-            canvas.regenerate_background_pattern();
-            canvas.update_engine_rendering();
+            canvas.background_regenerate_pattern();
+            canvas.update_rendering_current_viewport();
         }));
 
-        imp.background_pattern_color_choosebutton.connect_color_set(clone!(@weak appwindow => move |background_pattern_color_choosebutton| {
+        imp.doc_background_pattern_color_button.connect_rgba_notify(clone!(@weak appwindow => move |button| {
             let canvas = appwindow.active_tab().canvas();
 
-            canvas.engine().borrow_mut().document.background.pattern_color = background_pattern_color_choosebutton.rgba().into_compose_color();
-            canvas.regenerate_background_pattern();
-            canvas.update_engine_rendering();
+            canvas.engine().borrow_mut().document.background.pattern_color = button.rgba().into_compose_color();
+            canvas.background_regenerate_pattern();
+            canvas.update_rendering_current_viewport();
         }));
 
-        imp.background_pattern_width_unitentry.get().connect_notify_local(
+        imp.doc_background_pattern_width_unitentry.get().connect_notify_local(
             Some("value"),
             clone!(@weak self as settings_panel, @weak appwindow => move |unit_entry, _| {
                     let canvas = appwindow.active_tab().canvas();
@@ -637,20 +659,20 @@ impl RnSettingsPanel {
                     let mut pattern_size = canvas.engine().borrow().document.background.pattern_size;
                     pattern_size[0] = unit_entry.value_in_px();
                     canvas.engine().borrow_mut().document.background.pattern_size = pattern_size;
-                    canvas.regenerate_background_pattern();
-                    canvas.update_engine_rendering();
+                    canvas.background_regenerate_pattern();
+                    canvas.update_rendering_current_viewport();
             }),
         );
 
-        imp.background_pattern_height_unitentry.get().connect_notify_local(
+        imp.doc_background_pattern_height_unitentry.get().connect_notify_local(
             Some("value"),
             clone!(@weak self as settings_panel, @weak appwindow => move |unit_entry, _| {
                     let canvas = appwindow.active_tab().canvas();
                     let mut pattern_size = canvas.engine().borrow().document.background.pattern_size;
                     pattern_size[1] = unit_entry.value_in_px();
                     canvas.engine().borrow_mut().document.background.pattern_size = pattern_size;
-                    canvas.regenerate_background_pattern();
-                    canvas.update_engine_rendering();
+                    canvas.background_regenerate_pattern();
+                    canvas.update_rendering_current_viewport();
             }),
         );
     }

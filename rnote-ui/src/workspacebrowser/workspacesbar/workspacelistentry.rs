@@ -1,3 +1,5 @@
+// Imports
+use self::imp::RnWorkspaceListEntryInner;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{gdk, glib};
@@ -6,8 +8,6 @@ use rnote_compose::color;
 use rnote_engine::utils::GdkRGBAHelpers;
 use std::cell::RefCell;
 use std::path::PathBuf;
-
-use self::imp::RnWorkspaceListEntryInner;
 
 mod imp {
     use super::*;
@@ -176,6 +176,12 @@ impl RnWorkspaceListEntry {
 
     pub(crate) fn set_name(&self, name: String) {
         self.set_property("name", name.to_value());
+    }
+
+    pub(crate) fn canonicalize_dir(&self) -> anyhow::Result<()> {
+        let p = PathBuf::from(self.dir()).canonicalize()?;
+        self.set_dir(p.to_string_lossy().to_string());
+        Ok(())
     }
 }
 

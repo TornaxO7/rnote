@@ -1,21 +1,27 @@
-use std::time::Instant;
-
-use rnote_compose::penevents::PenEvent;
-
+// Imports
+use super::PenStyle;
 use crate::engine::{EngineView, EngineViewMut};
 use crate::{DrawOnDocBehaviour, WidgetFlags};
+use rnote_compose::penevents::PenEvent;
+use std::time::Instant;
 
-use super::PenStyle;
-
-/// types that are pens and can handle pen events
+/// Types that are pens.
 pub trait PenBehaviour: DrawOnDocBehaviour {
-    // gives what pen style it is
+    /// Init the pen.
+    ///
+    /// Should be called right after creating a new pen instance.
+    fn init(&mut self, _engine_view: &EngineView) -> WidgetFlags;
+
+    /// Deinit the pen.
+    fn deinit(&mut self) -> WidgetFlags;
+
+    // The pen style.
     fn style(&self) -> PenStyle;
 
-    /// init the pen with initial state with the engine view
+    /// Update the pen and pen config state with the state from the engine.
     fn update_state(&mut self, engine_view: &mut EngineViewMut) -> WidgetFlags;
 
-    /// Handles a pen event
+    /// Handle a pen event.
     fn handle_event(
         &mut self,
         event: PenEvent,
@@ -23,7 +29,7 @@ pub trait PenBehaviour: DrawOnDocBehaviour {
         engine_view: &mut EngineViewMut,
     ) -> (PenProgress, WidgetFlags);
 
-    /// fetches clipboard content from the pen
+    /// Fetch clipboard content from the pen.
     #[allow(clippy::type_complexity)]
     fn fetch_clipboard_content(
         &self,
@@ -32,7 +38,7 @@ pub trait PenBehaviour: DrawOnDocBehaviour {
         Ok((None, WidgetFlags::default()))
     }
 
-    /// cut clipboard content from the pen
+    /// Cut clipboard content from the pen.
     #[allow(clippy::type_complexity)]
     fn cut_clipboard_content(
         &mut self,

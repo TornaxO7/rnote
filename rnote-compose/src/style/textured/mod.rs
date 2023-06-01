@@ -1,3 +1,4 @@
+// Modules
 mod textureddotsdistribution;
 mod texturedoptions;
 
@@ -5,16 +6,15 @@ mod texturedoptions;
 pub use textureddotsdistribution::TexturedDotsDistribution;
 pub use texturedoptions::TexturedOptions;
 
+// Imports
+use super::Composer;
 use crate::helpers::Vector2Helpers;
 use crate::penpath::Segment;
 use crate::shapes::{Line, ShapeBehaviour};
 use crate::PenPath;
 use kurbo::Shape;
 use p2d::bounding_volume::{Aabb, BoundingVolume};
-
 use rand_distr::{Distribution, Uniform};
-
-use super::Composer;
 
 impl Composer<TexturedOptions> for Line {
     fn composed_bounds(&self, options: &TexturedOptions) -> Aabb {
@@ -106,6 +106,11 @@ impl Composer<TexturedOptions> for PenPath {
 
         let mut prev = self.start;
         for seg in self.segments.iter() {
+            if seg.end().pos == self.start.pos {
+                options.advance_seed();
+                continue;
+            }
+
             match seg {
                 Segment::LineTo { end } => {
                     let line = Line {

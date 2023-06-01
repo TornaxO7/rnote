@@ -1,21 +1,21 @@
-use p2d::bounding_volume::Aabb;
-use serde::{Deserialize, Serialize};
-
+// Imports
 use crate::helpers::{AabbHelpers, Vector2Helpers};
 use crate::shapes::Rectangle;
 use crate::shapes::ShapeBehaviour;
 use crate::transform::TransformBehaviour;
 use crate::Transform;
+use p2d::bounding_volume::Aabb;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 #[serde(default, rename = "line")]
-/// A line
+/// A line.
 pub struct Line {
     #[serde(rename = "start", with = "crate::serialize::na_vector2_f64_dp3")]
-    /// The line start
+    /// Start coordinate.
     pub start: na::Vector2<f64>,
     #[serde(rename = "end", with = "crate::serialize::na_vector2_f64_dp3")]
-    /// The line end
+    /// End coordinate.
     pub end: na::Vector2<f64>,
 }
 
@@ -29,8 +29,8 @@ impl TransformBehaviour for Line {
         let mut isometry = na::Isometry2::identity();
         isometry.append_rotation_wrt_point_mut(&na::UnitComplex::new(angle), &center);
 
-        self.start = (isometry * na::Point2::from(self.start)).coords;
-        self.end = (isometry * na::Point2::from(self.end)).coords;
+        self.start = isometry.transform_point(&self.start.into()).coords;
+        self.end = isometry.transform_point(&self.end.into()).coords;
     }
 
     fn scale(&mut self, scale: na::Vector2<f64>) {
@@ -41,7 +41,7 @@ impl TransformBehaviour for Line {
 
 impl ShapeBehaviour for Line {
     fn bounds(&self) -> Aabb {
-        AabbHelpers::new_positive(na::Point2::from(self.start), na::Point2::from(self.end))
+        AabbHelpers::new_positive(self.start.into(), self.end.into())
     }
 
     fn hitboxes(&self) -> Vec<Aabb> {
@@ -55,7 +55,7 @@ impl ShapeBehaviour for Line {
 }
 
 impl Line {
-    /// creates a rect in the direction of the line, with a constant given width
+    /// Create a rectangle rotated in the direction of the line, with the given width.
     pub fn line_w_width_to_rect(&self, width: f64) -> Rectangle {
         let vec = self.end - self.start;
         let magn = vec.magnitude();
@@ -67,7 +67,7 @@ impl Line {
         }
     }
 
-    /// Splits itself given the no splits
+    /// Split itself given the number of splits.
     pub fn split(&self, n_splits: i32) -> Vec<Self> {
         (0..n_splits)
             .map(|i| {
@@ -86,7 +86,7 @@ impl Line {
             .collect::<Vec<Self>>()
     }
 
-    /// to kurbo
+    /// Convert to kurbo shape.
     pub fn to_kurbo(&self) -> kurbo::Line {
         kurbo::Line::new(self.start.to_kurbo_point(), self.end.to_kurbo_point())
     }

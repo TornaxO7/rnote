@@ -1,3 +1,4 @@
+// Imports
 use p2d::bounding_volume::Aabb;
 
 /// Helpers that extend the Vector2 type
@@ -237,21 +238,21 @@ impl AabbHelpers for Aabb {
 
     fn extend_by(&self, extend_by: na::Vector2<f64>) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords - extend_by),
-            na::Point2::from(self.maxs.coords + extend_by),
+            (self.mins.coords - extend_by).into(),
+            (self.maxs.coords + extend_by).into(),
         )
     }
 
     fn extend_left_by(&self, extend: f64) -> Aabb {
         Aabb::new(
             na::point![self.mins.coords[0] - extend, self.mins.coords[1]],
-            na::Point2::from(self.maxs.coords),
+            self.maxs.coords.into(),
         )
     }
 
     fn extend_right_by(&self, extend: f64) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords),
+            self.mins.coords.into(),
             na::point![self.maxs.coords[0] + extend, self.maxs.coords[1]],
         )
     }
@@ -259,35 +260,35 @@ impl AabbHelpers for Aabb {
     fn extend_top_by(&self, extend: f64) -> Aabb {
         Aabb::new(
             na::point![self.mins.coords[0], self.mins.coords[1] - extend],
-            na::Point2::from(self.maxs.coords),
+            self.maxs.coords.into(),
         )
     }
 
     fn extend_bottom_by(&self, extend: f64) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords),
+            self.mins.coords.into(),
             na::point![self.maxs.coords[0], self.maxs.coords[1] + extend],
         )
     }
 
     fn extend_right_and_bottom_by(&self, extend_by: nalgebra::Vector2<f64>) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords),
-            na::Point2::from(self.maxs.coords + extend_by),
+            self.mins.coords.into(),
+            (self.maxs.coords + extend_by).into(),
         )
     }
 
     fn scale(&self, scale: f64) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords.scale(scale)),
-            na::Point2::from(self.maxs.coords.scale(scale)),
+            self.mins.coords.scale(scale).into(),
+            self.maxs.coords.scale(scale).into(),
         )
     }
 
     fn scale_non_uniform(&self, scale: na::Vector2<f64>) -> Aabb {
         Aabb::new(
-            na::Point2::from(self.mins.coords.component_mul(&scale)),
-            na::Point2::from(self.maxs.coords.component_mul(&scale)),
+            self.mins.coords.component_mul(&scale).into(),
+            self.maxs.coords.component_mul(&scale).into(),
         )
     }
 
@@ -448,8 +449,7 @@ pub fn scale_w_locked_aspectratio(
     src_size: na::Vector2<f64>,
     max_size: na::Vector2<f64>,
 ) -> na::Vector2<f64> {
-    let ratio = (max_size[0] / src_size[0]).min(max_size[1] / src_size[1]);
-
+    let ratio = (max_size[0] / src_size[0] + max_size[1] / src_size[1]) / 2.0;
     src_size * ratio
 }
 

@@ -1,11 +1,12 @@
-use std::ops::Range;
-
-use super::strokebehaviour::GeneratedStrokeImages;
+// Imports
+use super::strokebehaviour::{self, GeneratedStrokeImages};
 use super::{Stroke, StrokeBehaviour};
 use crate::document::Format;
 use crate::engine::import::{PdfImportPageSpacing, PdfImportPrefs};
 use crate::render;
 use crate::DrawBehaviour;
+use anyhow::Context;
+use p2d::bounding_volume::{Aabb, BoundingVolume};
 use piet::RenderContext;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rnote_compose::color;
@@ -14,16 +15,16 @@ use rnote_compose::shapes::Rectangle;
 use rnote_compose::shapes::ShapeBehaviour;
 use rnote_compose::transform::Transform;
 use rnote_compose::transform::TransformBehaviour;
-
-use anyhow::Context;
-use gtk4::{cairo, glib};
-use p2d::bounding_volume::{Aabb, BoundingVolume};
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename = "bitmapimage")]
 pub struct BitmapImage {
-    /// The bounds field of the image should not be used to determine the stroke bounds. Use rectangle.bounds() instead.
+    /// The bitmap image.
+    ///
+    /// The bounds field of the image should not be used to determine the stroke bounds.
+    /// Use rectangle.bounds() instead.
     #[serde(rename = "image")]
     pub image: render::Image,
     #[serde(rename = "rectangle")]
@@ -83,6 +84,22 @@ impl StrokeBehaviour for BitmapImage {
             })
         }
     }
+
+    fn draw_highlight(
+        &self,
+        cx: &mut impl piet::RenderContext,
+        total_zoom: f64,
+    ) -> anyhow::Result<()> {
+        const HIGHLIGHT_STROKE_WIDTH: f64 = 1.5;
+        cx.stroke(
+            self.bounds().to_kurbo_rect(),
+            &*strokebehaviour::STROKE_HIGHLIGHT_COLOR,
+            HIGHLIGHT_STROKE_WIDTH / total_zoom,
+        );
+        Ok(())
+    }
+
+    fn update_geometry(&mut self) {}
 }
 
 impl DrawBehaviour for BitmapImage {

@@ -1,11 +1,7 @@
+// Modules
 mod appactions;
 
 // Imports
-use adw::subclass::prelude::AdwApplicationImpl;
-use gtk4::{gio, glib, prelude::*, subclass::prelude::*};
-use rnote_engine::document::format::MeasureUnit;
-use rnote_engine::pens::PenStyle;
-
 use crate::{
     colorpicker::RnColorPad, colorpicker::RnColorSetter, config, globals, penssidebar::RnBrushPage,
     penssidebar::RnEraserPage, penssidebar::RnSelectorPage, penssidebar::RnShaperPage,
@@ -16,12 +12,13 @@ use crate::{
     RnCanvas, RnCanvasMenu, RnCanvasWrapper, RnColorPicker, RnIconPicker, RnMainHeader, RnOverlays,
     RnPensSideBar, RnSettingsPanel, RnStrokeWidthPicker, RnUnitEntry, RnWorkspaceBrowser,
 };
+use adw::subclass::prelude::AdwApplicationImpl;
+use gtk4::{gio, glib, prelude::*, subclass::prelude::*};
 
 mod imp {
     use super::*;
 
-    #[allow(missing_debug_implementations)]
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     pub(crate) struct RnApp {}
 
     #[glib::object_subclass]
@@ -73,8 +70,6 @@ mod imp {
         fn init(&self) {
             let obj = self.obj();
 
-            self.setup_logging();
-            self.setup_i18n();
             self.setup_gresources();
             obj.setup_actions();
             obj.setup_action_accels();
@@ -84,31 +79,12 @@ mod imp {
         fn new_appwindow_init_show(&self, input_file: Option<gio::File>) {
             let appwindow = RnAppWindow::new(self.obj().upcast_ref::<gtk4::Application>());
             appwindow.init();
-            appwindow.show();
+            appwindow.present();
 
             // Loading in input file in the first tab, if Some
             if let Some(input_file) = input_file {
                 appwindow.open_file_w_dialogs(input_file, None, false);
             }
-        }
-
-        fn setup_logging(&self) {
-            if let Err(e) = pretty_env_logger::try_init_timed() {
-                eprintln!("initializing logging failed, Err: {e:?}");
-            } else {
-                log::debug!("... env_logger initialized");
-            }
-        }
-
-        fn setup_i18n(&self) {
-            gettextrs::setlocale(gettextrs::LocaleCategory::LcAll, "");
-            gettextrs::bindtextdomain(
-                config::GETTEXT_PACKAGE,
-                crate::env::locale_dir().expect("Could not get locale dir while setting up i18n"),
-            )
-            .expect("Unable to bind the text domain");
-            gettextrs::textdomain(config::GETTEXT_PACKAGE)
-                .expect("Unable to switch to the text domain");
         }
 
         fn setup_gresources(&self) {
@@ -131,12 +107,10 @@ mod imp {
             RnSelectorPage::static_type();
             RnTypewriterPage::static_type();
             RnToolsPage::static_type();
-            PenStyle::static_type();
             RnWorkspaceBrowser::static_type();
             RnWorkspacesBar::static_type();
             RnFileRow::static_type();
             RnWorkspaceRow::static_type();
-            MeasureUnit::static_type();
             RnUnitEntry::static_type();
             RnIconPicker::static_type();
             RnPenShortcutRow::static_type();
@@ -172,8 +146,8 @@ impl Default for RnApp {
 impl RnApp {
     pub(crate) fn new() -> Self {
         glib::Object::builder()
-            .property("application-id", &config::APP_ID)
-            .property("flags", &gio::ApplicationFlags::HANDLES_OPEN)
+            .property("application-id", config::APP_ID)
+            .property("flags", gio::ApplicationFlags::HANDLES_OPEN)
             .property("register-session", true)
             .build()
     }

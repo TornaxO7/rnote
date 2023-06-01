@@ -1,7 +1,10 @@
+// Imports
 use gtk4::{gdk, gio, glib, prelude::*, Widget};
 use p2d::bounding_volume::Aabb;
+use std::cell::Ref;
+use std::slice::Iter;
 
-/// File types supported by Rnote
+/// File types supported by Rnote.
 #[derive(Debug)]
 pub(crate) enum FileType {
     Folder,
@@ -85,6 +88,7 @@ impl FileType {
     }
 }
 
+/// Checks if the file is a temporary goutputstream file.
 pub(crate) fn is_goutputstream_file(file: &gio::File) -> bool {
     if let Some(path) = file.path() {
         if let Some(file_name) = path.file_name() {
@@ -97,7 +101,7 @@ pub(crate) fn is_goutputstream_file(file: &gio::File) -> bool {
     false
 }
 
-/// Translates a Aabb to the coordinate space of the dest_widget. None if the widgets don't have a common ancestor
+/// Translates a Aabb from the the coordinate space of `widget` to `dest_widget`. None if the widgets don't have a common ancestor.
 #[allow(unused)]
 pub(crate) fn translate_aabb_to_widget(
     aabb: Aabb,
@@ -115,7 +119,7 @@ pub(crate) fn translate_aabb_to_widget(
     Some(Aabb::new(mins, maxs))
 }
 
-/// Create a new file or replace if it already exists, asynchronously
+/// Create a new file or replace if it already exists, asynchronously.
 pub(crate) async fn create_replace_file_future(
     bytes: Vec<u8>,
     file: &gio::File,
@@ -164,7 +168,7 @@ pub(crate) fn str_from_u8_nul_utf8(utf8_src: &[u8]) -> Result<&str, std::str::Ut
 
 /// Gets the index of the AxisUse enum
 ///
-/// TODO: Report to gtk-rs that AxisUse needs a Into<Index> implementation for usage to retrieve pointer axes in `TimeCoord`
+/// TODO: Report to gtk-rs that [gdk::AxisUse] needs a [`Into<std::ops::Index>`] implementation for usage to retrieve pointer axes in [gdk::TimeCoord]
 pub(crate) fn axis_use_idx(a: gdk::AxisUse) -> usize {
     match a {
         gdk::AxisUse::Ignore => 0,
@@ -180,5 +184,48 @@ pub(crate) fn axis_use_idx(a: gdk::AxisUse) -> usize {
         gdk::AxisUse::Rotation => 10,
         gdk::AxisUse::Slider => 11,
         _ => unreachable!(),
+    }
+}
+
+pub fn default_file_title_for_export(
+    output_file: Option<gio::File>,
+    fallback: Option<&str>,
+    suffix: Option<&str>,
+) -> String {
+    let mut title = output_file
+        .and_then(|f| Some(f.basename()?.file_stem()?.to_string_lossy().to_string()))
+        .unwrap_or_else(|| {
+            fallback
+                .map(|f| f.to_owned())
+                .unwrap_or_else(rnote_engine::utils::now_formatted_string)
+        });
+
+    if let Some(suffix) = suffix {
+        title += suffix;
+    }
+
+    title
+}
+
+/// Wrapper type that enables iterating over [`std::cell::RefCell<Vec<T>>`]
+pub(crate) struct VecRefWrapper<'a, T: 'a> {
+    r: Ref<'a, Vec<T>>,
+}
+
+impl<'a, 'b: 'a, T: 'a> IntoIterator for &'b VecRefWrapper<'a, T> {
+    type IntoIter = Iter<'a, T>;
+    type Item = &'a T;
+
+    fn into_iter(self) -> Iter<'a, T> {
+        self.r.iter()
+    }
+}
+
+impl<'a, T> VecRefWrapper<'a, T>
+where
+    T: 'a,
+{
+    pub(crate) fn new(r: Ref<'a, Vec<T>>) -> Self {
+        Self { r }
     }
 }

@@ -1,4 +1,7 @@
-use gtk4::pango;
+// Imports
+use super::strokebehaviour::GeneratedStrokeImages;
+use super::StrokeBehaviour;
+use crate::{render, strokes::strokebehaviour, Camera, DrawBehaviour};
 use kurbo::Shape;
 use once_cell::sync::Lazy;
 use p2d::bounding_volume::{Aabb, BoundingVolume};
@@ -9,11 +12,7 @@ use rnote_compose::transform::TransformBehaviour;
 use rnote_compose::{color, Color, Transform};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
-use unicode_segmentation::GraphemeCursor;
-
-use super::strokebehaviour::GeneratedStrokeImages;
-use super::StrokeBehaviour;
-use crate::{render, Camera, DrawBehaviour};
+use unicode_segmentation::{GraphemeCursor, UnicodeSegmentation};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename = "font_style")]
@@ -44,26 +43,6 @@ impl From<FontStyle> for piet::FontStyle {
         match font_style {
             FontStyle::Regular => piet::FontStyle::Regular,
             FontStyle::Italic => piet::FontStyle::Italic,
-        }
-    }
-}
-
-impl From<pango::Style> for FontStyle {
-    fn from(pango_style: pango::Style) -> Self {
-        match pango_style {
-            pango::Style::Normal => Self::Regular,
-            pango::Style::Oblique => Self::Italic,
-            pango::Style::Italic => Self::Italic,
-            _ => Self::Regular,
-        }
-    }
-}
-
-impl From<FontStyle> for pango::Style {
-    fn from(font_style: FontStyle) -> Self {
-        match font_style {
-            FontStyle::Regular => pango::Style::Normal,
-            FontStyle::Italic => pango::Style::Italic,
         }
     }
 }
@@ -103,22 +82,6 @@ impl From<TextAlignment> for piet::TextAlignment {
     }
 }
 
-impl TextAlignment {
-    #[allow(unused)]
-    pub fn from_pango_layout(pango_layout: pango::Layout) -> Self {
-        if pango_layout.is_justify() {
-            Self::Fill
-        } else {
-            match pango_layout.alignment() {
-                pango::Alignment::Left => Self::Start,
-                pango::Alignment::Center => Self::Center,
-                pango::Alignment::Right => Self::End,
-                _ => Self::Start,
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename = "text_attribute")]
 pub enum TextAttribute {
@@ -128,13 +91,13 @@ pub enum TextAttribute {
     /// The font size, in points.
     #[serde(rename = "font_size")]
     FontSize(f64),
-    /// The font weight
+    /// The font weight.
     #[serde(rename = "font_weight")]
     FontWeight(u16),
     /// The foreground color of the text.
     #[serde(rename = "text_color")]
     TextColor(Color),
-    /// The font style
+    /// The font style.
     #[serde(rename = "font_style")]
     Style(FontStyle),
     /// Underline.
@@ -234,41 +197,6 @@ impl TextStyle {
     pub const FONT_WEIGHT_DEFAULT: u16 = 500;
     pub const FONT_COLOR_DEFAULT: Color = Color::BLACK;
 
-    pub fn load_pango_font_desc(&mut self, pango_font_desc: pango::FontDescription) {
-        if let Some(font_family) = pango_font_desc.family() {
-            self.font_family = font_family.to_string();
-        }
-
-        let font_size = f64::from(pango_font_desc.size()) / f64::from(pango::SCALE);
-        // Is <= 0.0 when no font size is selected
-        if font_size > 0.0 {
-            self.font_size = font_size;
-        }
-
-        self.font_weight = crate::utils::pango_font_weight_to_raw(pango_font_desc.weight());
-        self.font_style = pango_font_desc.style().into();
-    }
-
-    pub fn extract_pango_font_desc(&self) -> pango::FontDescription {
-        let mut pango_font_desc = pango::FontDescription::new();
-        pango_font_desc.set_family(self.font_family.as_str());
-        pango_font_desc.set_size((self.font_size * f64::from(pango::SCALE)).round() as i32);
-        pango_font_desc.set_weight(crate::utils::raw_font_weight_to_pango(self.font_weight));
-        pango_font_desc.set_style(self.font_style.into());
-
-        /*
-               log::debug!(
-                   "extract_pango_font_descr\nfamily: {:?}; size: {:?}, weight: {:?}, style: {:?}",
-                   pango_font_desc.family(),
-                   pango_font_desc.size(),
-                   pango_font_desc.weight(),
-                   pango_font_desc.style()
-               );
-        */
-
-        pango_font_desc
-    }
-
     pub fn build_text_layout<T>(
         &self,
         piet_text: &mut T,
@@ -295,7 +223,9 @@ impl TextStyle {
             text_layout_builder = text_layout_builder.max_width(max_width);
         }
 
-        // We need to sort the ranges before adding them to the text layout, else attributes might be skipped. (the cairo backend asserts for it in debug builds)
+        // We need to sort the ranges before adding them to the text layout, else attributes might be skipped.
+        // The cairo backend asserts for it in debug builds.
+        //
         // see https://docs.rs/piet/latest/piet/trait.TextLayoutBuilder.html#tymethod.range_attribute
         let mut ranged_text_attributes = self.ranged_text_attributes.clone();
         ranged_text_attributes
@@ -329,8 +259,7 @@ impl TextStyle {
         Some(na::vector![size.width, size.height])
     }
 
-    /// the cursors line metric relative to the textstroke bounds.
-    /// Index must be at a grapheme boundary
+    /// The cursors line metric relative to the textstroke bounds.
     pub fn lines<T>(&self, piet_text: &mut T, text: String) -> anyhow::Result<Vec<piet::LineMetric>>
     where
         T: piet::Text,
@@ -342,8 +271,9 @@ impl TextStyle {
             .collect::<Vec<piet::LineMetric>>())
     }
 
-    /// the cursors line metric relative to the textstroke bounds.
-    /// Index must be at a grapheme boundary
+    /// The cursors line metric relative to the textstroke bounds.
+    ///
+    /// Index must be at a grapheme boundary.
     pub fn cursor_line_metric<T>(
         &self,
         piet_text: &mut T,
@@ -392,7 +322,7 @@ impl TextStyle {
         Ok(text_layout.rects_for_range(range))
     }
 
-    /// The line metric is relative to the transform
+    /// Draw the cursor.
     pub fn draw_cursor(
         &self,
         cx: &mut impl piet::RenderContext,
@@ -403,7 +333,7 @@ impl TextStyle {
     ) -> anyhow::Result<()> {
         const CURSOR_COLOR: piet::Color = color::GNOME_DARKS[2];
         const CURSOR_OUTLINE_COLOR: piet::Color = color::GNOME_BRIGHTS[0];
-        let text_cursor_width = 3.0 / camera.total_zoom();
+        let text_cursor_width = 2.0 / camera.total_zoom();
 
         if let Ok(cursor_line_metric) =
             self.cursor_line_metric(cx.text(), text.clone(), cursor.cur_cursor())
@@ -422,8 +352,18 @@ impl TextStyle {
                     ),
                 );
 
-            cx.stroke(text_cursor, &CURSOR_OUTLINE_COLOR, text_cursor_width);
-            cx.stroke(text_cursor, &CURSOR_COLOR, text_cursor_width * 0.7);
+            cx.stroke_styled(
+                text_cursor,
+                &CURSOR_OUTLINE_COLOR,
+                text_cursor_width,
+                &piet::StrokeStyle::default().line_cap(piet::LineCap::Butt),
+            );
+            cx.stroke_styled(
+                text_cursor,
+                &CURSOR_COLOR,
+                text_cursor_width * 0.8,
+                &piet::StrokeStyle::default().line_cap(piet::LineCap::Butt),
+            );
         }
 
         Ok(())
@@ -438,20 +378,18 @@ impl TextStyle {
         transform: &Transform,
         camera: &Camera,
     ) {
-        static OUTLINE_COLOR: Lazy<piet::Color> =
-            Lazy::new(|| color::GNOME_BLUES[2].with_alpha(0.941));
-        static FILL_COLOR: Lazy<piet::Color> =
-            Lazy::new(|| color::GNOME_BLUES[0].with_alpha(0.090));
+        static OUTLINE_COLOR: Lazy<piet::Color> = Lazy::new(|| color::GNOME_BLUES[2]);
+        static FILL_COLOR: Lazy<piet::Color> = Lazy::new(|| color::GNOME_BLUES[1].with_alpha(0.1));
         let outline_width = 1.5 / camera.total_zoom();
 
         if let Ok(selection_rects) =
             self.get_selection_rects_for_cursors(text, cursor, selection_cursor)
         {
             for selection_rect in selection_rects {
-                let selection_rectpath = transform.to_kurbo() * selection_rect.to_path(0.1);
+                let outline = transform.to_kurbo() * selection_rect.to_path(0.5);
 
-                cx.fill(selection_rectpath.clone(), &*FILL_COLOR);
-                cx.stroke(selection_rectpath, &*OUTLINE_COLOR, outline_width);
+                cx.fill(&outline, &*FILL_COLOR);
+                cx.stroke(&outline, &*OUTLINE_COLOR, outline_width);
             }
         }
     }
@@ -462,7 +400,9 @@ impl TextStyle {
 pub struct TextStroke {
     #[serde(rename = "text")]
     pub text: String,
-    /// The translation part is the position of the upper left corner
+    /// The transformation.
+    ///
+    /// The translation part Is the position of the upper left corner
     #[serde(rename = "transform")]
     pub transform: Transform,
     #[serde(rename = "text_style")]
@@ -501,10 +441,8 @@ impl ShapeBehaviour for TextStroke {
             .unwrap_or_else(|| na::Vector2::repeat(self.text_style.font_size))
             .maxs(&na::vector![1.0, 1.0]);
 
-        self.transform.transform_aabb(Aabb::new(
-            na::point![0.0, 0.0],
-            na::Point2::from(untransformed_size),
-        ))
+        self.transform
+            .transform_aabb(Aabb::new(na::point![0.0, 0.0], untransformed_size.into()))
     }
 
     fn hitboxes(&self) -> Vec<Aabb> {
@@ -531,12 +469,14 @@ impl ShapeBehaviour for TextStroke {
         let text_size = text_layout.size();
 
         if hitboxes.is_empty() {
-            hitboxes.push(self.transform.transform_aabb(Aabb::new_positive(
-                na::point![0.0, 0.0],
-                na::Point2::from(
-                    na::vector![text_size.width, text_size.height].maxs(&na::vector![1.0, 1.0]),
-                ),
-            )))
+            hitboxes.push(
+                self.transform.transform_aabb(Aabb::new_positive(
+                    na::point![0.0, 0.0],
+                    na::vector![text_size.width, text_size.height]
+                        .maxs(&na::vector![1.0, 1.0])
+                        .into(),
+                )),
+            )
         }
 
         hitboxes
@@ -588,6 +528,22 @@ impl StrokeBehaviour for TextStroke {
             })
         }
     }
+
+    fn draw_highlight(
+        &self,
+        cx: &mut impl piet::RenderContext,
+        total_zoom: f64,
+    ) -> anyhow::Result<()> {
+        const HIGHLIGHT_STROKE_WIDTH: f64 = 1.5;
+        cx.stroke(
+            self.bounds().to_kurbo_rect(),
+            &*strokebehaviour::STROKE_HIGHLIGHT_COLOR,
+            HIGHLIGHT_STROKE_WIDTH / total_zoom,
+        );
+        Ok(())
+    }
+
+    fn update_geometry(&mut self) {}
 }
 
 impl DrawBehaviour for TextStroke {
@@ -620,7 +576,9 @@ impl TextStroke {
         &self.text[range]
     }
 
-    // Gets a cursor matching best for the given coord. The coord is in global coordinate space
+    /// Get a cursor matching best for the given coordinate.
+    ///
+    /// `coord` must be in global coordinate space.
     pub fn get_cursor_for_global_coord(
         &self,
         coord: na::Vector2<f64>,
@@ -630,7 +588,10 @@ impl TextStroke {
             .build_text_layout(&mut piet_cairo::CairoText::new(), self.text.clone())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let hit_test_point = text_layout.hit_test_point(
-            (self.transform.affine.inverse() * na::Point2::from(coord))
+            self.transform
+                .affine
+                .inverse()
+                .transform_point(&coord.into())
                 .coords
                 .to_kurbo_point(),
         );
@@ -689,6 +650,42 @@ impl TextStroke {
         }
     }
 
+    pub fn remove_word_before_cursor(&mut self, cursor: &mut GraphemeCursor) {
+        let cur_pos = cursor.cur_cursor();
+        let prev_pos = self.get_prev_word_start_index(cur_pos);
+
+        if cur_pos != prev_pos {
+            self.text.replace_range(prev_pos..cur_pos, "");
+
+            // translate the text attributes
+            self.translate_attrs_after_cursor(
+                prev_pos,
+                prev_pos as i32 - cur_pos as i32 + "".len() as i32,
+            );
+
+            // New text length, new cursor
+            *cursor = GraphemeCursor::new(prev_pos, self.text.len(), true);
+        }
+    }
+
+    pub fn remove_word_after_cursor(&mut self, cursor: &mut GraphemeCursor) {
+        let cur_pos = cursor.cur_cursor();
+        let next_pos = self.get_next_word_end_index(cur_pos);
+
+        if cur_pos != next_pos {
+            self.text.replace_range(cur_pos..next_pos, "");
+
+            // translate the text attributes
+            self.translate_attrs_after_cursor(
+                cur_pos,
+                -(next_pos as i32 - cur_pos as i32) + "".len() as i32,
+            );
+
+            // New text length, new cursor
+            *cursor = GraphemeCursor::new(cur_pos, self.text.len(), true);
+        }
+    }
+
     pub fn replace_text_between_selection_cursors(
         &mut self,
         cursor: &mut GraphemeCursor,
@@ -723,7 +720,9 @@ impl TextStroke {
         );
     }
 
-    // Translates the ranged text attributes after the given cursor. Overlapping ranges are extended / shrunk
+    /// Translate the ranged text attributes after the given cursor.
+    ///
+    /// Overlapping ranges are extended / shrunk
     fn translate_attrs_after_cursor(&mut self, from_pos: usize, offset: i32) {
         for attr in self.text_style.ranged_text_attributes.iter_mut() {
             if attr.range.start > from_pos {
@@ -762,7 +761,7 @@ impl TextStroke {
         }
     }
 
-    /// Removes all attr in the given range
+    /// Remove all attributes in the given range.
     pub fn remove_attrs_for_range(&mut self, range: Range<usize>) {
         // partition into attrs that intersect the range, and those who don't and will be retained
         let (intersecting_attrs, mut retained_attrs): (
@@ -779,8 +778,6 @@ impl TextStroke {
         let truncated_attrs = intersecting_attrs
             .into_iter()
             .flat_map(|mut attr| {
-                //log::debug!("attr.range: {:?}, range: {:?}", attr.range, range);
-
                 if attr.range.start <= range.start && attr.range.end >= range.end {
                     // if the attribute completely contains the given range, split it
                     let mut first_split_attr = attr.clone();
@@ -818,8 +815,30 @@ impl TextStroke {
         cursor: &mut GraphemeCursor,
         selection_cursor: &mut GraphemeCursor,
     ) {
-        *cursor = GraphemeCursor::new(self.text.len(), self.text.len(), true);
-        *selection_cursor = GraphemeCursor::new(0, self.text.len(), true);
+        cursor.set_cursor(self.text.len());
+        selection_cursor.set_cursor(0);
+    }
+
+    fn get_prev_word_start_index(&self, current_char_index: usize) -> usize {
+        for (start_index, _) in self.text.unicode_word_indices().rev() {
+            if start_index < current_char_index {
+                return start_index;
+            }
+        }
+
+        current_char_index
+    }
+
+    fn get_next_word_end_index(&self, current_char_index: usize) -> usize {
+        for (start_index, word) in self.text.unicode_word_indices() {
+            let end_index = start_index + word.len();
+
+            if end_index > current_char_index {
+                return end_index;
+            }
+        }
+
+        current_char_index
     }
 
     pub fn move_cursor_back(&self, cursor: &mut GraphemeCursor) {
@@ -830,6 +849,74 @@ impl TextStroke {
     pub fn move_cursor_forward(&self, cursor: &mut GraphemeCursor) {
         // Cant fail, we are providing the entire text
         cursor.next_boundary(&self.text, 0).unwrap();
+    }
+
+    pub fn move_cursor_word_back(&self, cursor: &mut GraphemeCursor) {
+        cursor.set_cursor(self.get_prev_word_start_index(cursor.cur_cursor()));
+    }
+
+    pub fn move_cursor_word_forward(&self, cursor: &mut GraphemeCursor) {
+        cursor.set_cursor(self.get_next_word_end_index(cursor.cur_cursor()));
+    }
+
+    pub fn move_cursor_text_start(&self, cursor: &mut GraphemeCursor) {
+        cursor.set_cursor(0);
+    }
+
+    pub fn move_cursor_text_end(&self, cursor: &mut GraphemeCursor) {
+        cursor.set_cursor(self.text.len());
+    }
+
+    pub fn move_cursor_line_start(&self, cursor: &mut GraphemeCursor) {
+        if let (Ok(lines), Ok(hittest_position)) = (
+            self.text_style
+                .lines(&mut piet_cairo::CairoText::new(), self.text.clone()),
+            self.text_style.cursor_hittest_position(
+                &mut piet_cairo::CairoText::new(),
+                self.text.clone(),
+                cursor,
+            ),
+        ) {
+            cursor.set_cursor(lines[hittest_position.line].start_offset);
+        }
+    }
+
+    pub fn move_cursor_line_end(&self, cursor: &mut GraphemeCursor) {
+        if let (Ok(lines), Ok(hittest_position)) = (
+            self.text_style
+                .lines(&mut piet_cairo::CairoText::new(), self.text.clone()),
+            self.text_style.cursor_hittest_position(
+                &mut piet_cairo::CairoText::new(),
+                self.text.clone(),
+                cursor,
+            ),
+        ) {
+            let line_metric = &lines[hittest_position.line];
+            let mut offset = line_metric.end_offset;
+
+            // Move cursor in front of new line characters if they exist.
+            if offset > line_metric.start_offset
+                && self
+                    .text
+                    .chars()
+                    .nth(offset - 1)
+                    .map_or(false, |c| c == '\n')
+            {
+                offset -= 1;
+            }
+
+            if offset > line_metric.start_offset
+                && self
+                    .text
+                    .chars()
+                    .nth(offset - 1)
+                    .map_or(false, |c| c == '\r')
+            {
+                offset -= 1;
+            }
+
+            cursor.set_cursor(offset);
+        }
     }
 
     pub fn move_cursor_line_down(&self, cursor: &mut GraphemeCursor) {
@@ -854,7 +941,7 @@ impl TextStroke {
                     lines[next_line].y_offset + lines[next_line].height * 0.5,
                 ));
 
-                *cursor = GraphemeCursor::new(hit_test_point.idx, self.text.len(), true);
+                cursor.set_cursor(hit_test_point.idx);
             }
         }
     }
@@ -879,7 +966,7 @@ impl TextStroke {
                     lines[prev_line].y_offset + lines[prev_line].height * 0.5,
                 ));
 
-                *cursor = GraphemeCursor::new(hit_test_point.idx, self.text.len(), true);
+                cursor.set_cursor(hit_test_point.idx);
             }
         }
     }

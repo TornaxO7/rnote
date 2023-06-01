@@ -1,11 +1,10 @@
-use std::cmp::Ordering;
-use std::sync::Arc;
-
+// Imports
+use super::{StrokeKey, StrokeStore};
 use p2d::bounding_volume::Aabb;
 use rayon::slice::ParallelSliceMut;
 use serde::{Deserialize, Serialize};
-
-use super::{StrokeKey, StrokeStore};
+use std::cmp::Ordering;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq)]
 #[serde(rename = "stroke_layer")]
@@ -100,7 +99,7 @@ impl StrokeStore {
         }
     }
 
-    /// Returns the keys in chronological order, as in first: gets drawn first, last: gets drawn last
+    /// Returns the keys in chronological order, as in first: gets drawn first, last: gets drawn last.
     pub fn keys_sorted_chrono(&self) -> Vec<StrokeKey> {
         let chrono_components = &self.chrono_components;
 
@@ -129,6 +128,30 @@ impl StrokeStore {
         let chrono_components = &self.chrono_components;
 
         let mut keys = self.key_tree.keys_intersecting_bounds(bounds);
+
+        keys.par_sort_unstable_by(|&first, &second| {
+            if let (Some(first_chrono), Some(second_chrono)) =
+                (chrono_components.get(first), chrono_components.get(second))
+            {
+                let layer_order = first_chrono.layer.cmp(&second_chrono.layer);
+
+                if layer_order != std::cmp::Ordering::Equal {
+                    layer_order
+                } else {
+                    first_chrono.t.cmp(&second_chrono.t)
+                }
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        });
+
+        keys
+    }
+
+    pub fn keys_sorted_chrono_in_bounds(&self, bounds: Aabb) -> Vec<StrokeKey> {
+        let chrono_components = &self.chrono_components;
+
+        let mut keys = self.key_tree.keys_in_bounds(bounds);
 
         keys.par_sort_unstable_by(|&first, &second| {
             if let (Some(first_chrono), Some(second_chrono)) =

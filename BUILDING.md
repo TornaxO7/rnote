@@ -1,7 +1,8 @@
 # Building
 
-First clone the repository and init its submodules
-```
+First install git, clone the repository and init its submodules
+```bash
+sudo dnf install git
 git clone https://github.com/flxzt/rnote
 cd rnote
 git submodule update --init --recursive
@@ -10,10 +11,10 @@ git submodule update --init --recursive
 ## Building with Flatpak
 There is a flatpak manifest in `build-aux/com.github.flxzt.rnote.Devel.yaml`.
 
-Make sure you have `flatpak` and `flatkpak-builder` installed on your system. You also need the Gnome 43 Runtime, SDK and some extensions:
+Make sure you have `flatpak` and `flatkpak-builder` installed on your system. You also need the Gnome Runtime, SDK and some extensions:
 
 ```bash
-flatpak install org.gnome.Platform//43 org.gnome.Sdk//43 org.freedesktop.Sdk.Extension.rust-stable//22.08 org.freedesktop.Sdk.Extension.llvm14//22.08
+flatpak install org.gnome.Platform//44 org.gnome.Sdk//44 org.freedesktop.Sdk.Extension.rust-stable//22.08 org.freedesktop.Sdk.Extension.llvm15//22.08
 ```
 
 Use Gnome Builder or VSCode with the [flatpak extension](https://marketplace.visualstudio.com/items?itemName=bilelmoussaoui.flatpak-vscode) to build and run the application for you. **This is the easiest and recommended way.**
@@ -71,7 +72,7 @@ If a native build on the host is wanted, meson can be called directly.
 
 Install all needed dependencies and build tools, e.g. for fedora 37:
 ```bash
-sudo dnf install gcc gcc-c++ clang clang-devel python3 make cmake meson kernel-devel gtk4-devel libadwaita-devel poppler-glib-devel poppler-data alsa-lib-devel
+sudo dnf install gcc gcc-c++ clang clang-devel python3 make cmake meson git kernel-devel gtk4-devel libadwaita-devel poppler-glib-devel poppler-data alsa-lib-devel
 ```
 
 Also make sure `rustc` and `cargo` are installed ( see [https://www.rust-lang.org/](https://www.rust-lang.org/) ). Then run:
@@ -82,7 +83,7 @@ meson setup --prefix=/usr _mesonbuild
 Meson will ask for the user password when needed.
 
 ### Configuration
-To enable the development profile, set `-Dprofile=devel` as a parameter. Else the `default` profile will be set.
+To enable the development profile, set `-Dprofile=devel` as a parameter in the setup. Else the `default` profile will be set.
 
 To enable building the `rnote-cli` binary, set `-Dcli=true`.
 

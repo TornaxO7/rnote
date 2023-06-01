@@ -1,20 +1,21 @@
+// Imports
+use super::PenStyle;
 use serde::{Deserialize, Serialize};
 
-use super::PenStyle;
-
-/// The pen mode
+/// The pen mode.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename = "pen_mode")]
 pub enum PenMode {
-    /// as pen (usually the default "side" of a stylus / when no buttons are pressed)
+    /// "Normal" pen mode.
+    /// Usually the default "side" of a stylus, when no buttons are pressed.
     #[serde(rename = "pen")]
     Pen,
-    /// as eraser
+    /// Eraser mode.
     #[serde(rename = "eraser")]
     Eraser,
 }
 
-/// the pen mode state, holding the current mode and pen styles for all pen modes
+/// The pen mode state, holding the current mode and pen styles for all pen modes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename = "pen_mode_state")]
 pub struct PenModeState {
@@ -45,6 +46,15 @@ impl Default for PenModeState {
 }
 
 impl PenModeState {
+    pub fn clone_config(&self) -> Self {
+        Self {
+            pen_mode: self.pen_mode,
+            penmode_pen_style: self.penmode_pen_style,
+            penmode_eraser_style: self.penmode_eraser_style,
+            ..Default::default()
+        }
+    }
+
     pub fn current_style_w_override(&self) -> PenStyle {
         match self.pen_mode {
             PenMode::Pen => self

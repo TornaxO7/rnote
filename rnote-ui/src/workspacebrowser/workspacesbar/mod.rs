@@ -1,3 +1,4 @@
+// Modules
 mod workspacelist;
 mod workspacelistentry;
 mod workspacerow;
@@ -11,7 +12,6 @@ pub(crate) use workspacerow::RnWorkspaceRow;
 // Imports
 use crate::appwindow::RnAppWindow;
 use crate::dialogs;
-
 use gtk4::{
     gdk, gio, glib, glib::clone, prelude::*, subclass::prelude::*, Button, CompositeTemplate,
     ListBox, ScrolledWindow, Widget,
@@ -213,9 +213,9 @@ impl RnWorkspacesBar {
     #[allow(unused)]
     pub(crate) fn set_selected_workspace_dir(&self, dir: PathBuf) {
         if let Some(i) = self.selected_workspace_index() {
-            let row = self.imp().workspace_list.remove(i as usize);
-            row.set_dir(dir.to_string_lossy().into());
-            self.imp().workspace_list.insert(i as usize, row);
+            let entry = self.imp().workspace_list.remove(i as usize);
+            entry.set_dir(dir.to_string_lossy().into());
+            self.imp().workspace_list.insert(i as usize, entry);
 
             self.select_workspace_by_index(i);
         }
@@ -272,6 +272,18 @@ impl RnWorkspacesBar {
         // Be sure to get the index before loading the workspaces, else the setting gets overridden
         let selected_workspace_index = settings.uint("selected-workspace-index");
 
+        // don't canonicalize on windows, because that would convert the path to one with extended length syntax
+        if !cfg!(target_os = "windows") {
+            for entry in &workspace_list.iter() {
+                if let Err(e) = entry.canonicalize_dir() {
+                    log::warn!(
+                    "failed to canonicalize dir {:?} for workspacelistentry with name: {}, Err: {e:?}",
+                    entry.dir(),
+                    entry.name()
+                )
+                }
+            }
+        }
         self.imp().workspace_list.replace_self(workspace_list);
 
         self.select_workspace_by_index(selected_workspace_index);
@@ -292,8 +304,12 @@ impl RnWorkspacesBar {
         let workspace_listbox = self.imp().workspaces_listbox.get();
         workspace_listbox.connect_selected_rows_changed(
             clone!(@weak appwindow, @weak self as workspacesbar => move |_| {
-                if let Some(dir) = workspacesbar.selected_workspacelistentry().map(|e| e.dir()) {
-                     appwindow.workspacebrowser().set_dirlist_file(Some(&gio::File::for_path(dir)));
+                if let Some(entry) = workspacesbar.selected_workspacelistentry() {
+                    let dir = entry.dir();
+                    let name = entry.name();
+                    appwindow.workspacebrowser().active_workspace_name_label().set_label(&name);
+                    appwindow.workspacebrowser().active_workspace_dir_label().set_label(&dir);
+                    appwindow.workspacebrowser().set_dirlist_file(Some(&gio::File::for_path(dir)));
 
                     workspacesbar.save_to_settings(&appwindow.app_settings());
                 }
@@ -305,13 +321,13 @@ impl RnWorkspacesBar {
             Some(&self.imp().workspace_list),
             clone!(@strong appwindow => move |obj| {
                 let entry = obj.to_owned().downcast::<RnWorkspaceListEntry>().unwrap();
-                let workspace_row = RnWorkspaceRow::new(&entry);
-                workspace_row.init(&appwindow);
+                let workspacerow = RnWorkspaceRow::new(&entry);
+                workspacerow.init(&appwindow);
 
                 let entry_expr = ConstantExpression::new(&entry);
-                entry_expr.bind(&workspace_row, "entry", None::<&glib::Object>);
+                entry_expr.bind(&workspacerow, "entry", None::<&glib::Object>);
 
-                workspace_row.upcast::<Widget>()
+                workspacerow.upcast::<Widget>()
             }),
         );
 
@@ -379,11 +395,13 @@ impl RnWorkspacesBar {
         // Add workspace
         action_add_workspace.connect_activate(
             clone!(@weak self as workspacesbar, @weak appwindow => move |_, _| {
+                glib::MainContext::default().spawn_local(clone!(@weak workspacesbar, @weak appwindow => async move {
                     let entry = workspacesbar.selected_workspacelistentry().unwrap_or_default();
                     workspacesbar.push_workspace(entry);
 
                     // Popup the edit dialog after creation
-                    dialogs::dialog_edit_selected_workspace(&appwindow);
+                    dialogs::dialog_edit_selected_workspace(&appwindow).await;
+                }));
             }),
         );
 
@@ -396,7 +414,9 @@ impl RnWorkspacesBar {
 
         // Edit selected workspace
         action_edit_selected_workspace.connect_activate(clone!(@weak appwindow => move |_, _| {
-            dialogs::dialog_edit_selected_workspace(&appwindow);
+            glib::MainContext::default().spawn_local(clone!(@weak appwindow => async move {
+                dialogs::dialog_edit_selected_workspace(&appwindow).await;
+            }));
         }));
     }
 }

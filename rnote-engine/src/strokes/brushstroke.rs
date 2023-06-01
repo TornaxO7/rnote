@@ -1,16 +1,19 @@
+// Imports
 use super::strokebehaviour::GeneratedStrokeImages;
 use super::StrokeBehaviour;
-use crate::render::{self};
 use crate::DrawBehaviour;
+use crate::{
+    render::{self},
+    strokes::strokebehaviour,
+};
+use p2d::bounding_volume::{Aabb, BoundingVolume};
 use piet::RenderContext;
-use rnote_compose::helpers::Vector2Helpers;
+use rnote_compose::helpers::{AabbHelpers, Vector2Helpers};
 use rnote_compose::penpath::{Element, Segment};
 use rnote_compose::shapes::ShapeBehaviour;
 use rnote_compose::style::Composer;
 use rnote_compose::transform::TransformBehaviour;
 use rnote_compose::{PenPath, Style};
-
-use p2d::bounding_volume::{Aabb, BoundingVolume};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,8 +23,8 @@ pub struct BrushStroke {
     pub path: PenPath,
     #[serde(default, rename = "style")]
     pub style: Style,
+    // since the path can have many hitboxes, we store them here and update them when the stroke geometry changes
     #[serde(skip)]
-    // since the path can have many hitboxes, we store them for faster queries and update them when the stroke geometry changes
     hitboxes: Vec<Aabb>,
 }
 
@@ -166,6 +169,39 @@ impl StrokeBehaviour for BrushStroke {
             Ok(GeneratedStrokeImages::Full(images))
         }
     }
+
+    fn draw_highlight(
+        &self,
+        cx: &mut impl piet::RenderContext,
+        total_zoom: f64,
+    ) -> anyhow::Result<()> {
+        const HIGHLIGHT_STROKE_WIDTH: f64 = 5.0;
+        const DRAW_BOUNDS_THRESHOLD_AREA: f64 = 10_u32.pow(2) as f64;
+
+        let bounds = self.bounds();
+
+        if bounds.scale(total_zoom).volume() < DRAW_BOUNDS_THRESHOLD_AREA {
+            cx.fill(
+                bounds.to_kurbo_rect(),
+                &*strokebehaviour::STROKE_HIGHLIGHT_COLOR,
+            );
+        } else {
+            cx.stroke_styled(
+                self.path.to_kurbo(),
+                &*strokebehaviour::STROKE_HIGHLIGHT_COLOR,
+                (HIGHLIGHT_STROKE_WIDTH / total_zoom)
+                    .max(self.style.stroke_width() + 2.0 / total_zoom),
+                &piet::StrokeStyle::new()
+                    .line_join(piet::LineJoin::Round)
+                    .line_cap(piet::LineCap::Round),
+            );
+        }
+        Ok(())
+    }
+
+    fn update_geometry(&mut self) {
+        self.hitboxes = self.gen_hitboxes_int();
+    }
 }
 
 impl DrawBehaviour for BrushStroke {
@@ -213,7 +249,7 @@ impl TransformBehaviour for BrushStroke {
 }
 
 impl BrushStroke {
-    /// when one of the extents of the stroke is above this threshold, images are generated separately for each stroke segment (to avoid very large images)
+    /// The threshold where when above it, images are generated for each segment instead of one for the entire stroke.
     pub const IMAGES_SEGMENTS_THRESHOLD: f64 = 1000.0;
 
     pub fn new(start: Element, style: Style) -> Self {
@@ -222,7 +258,7 @@ impl BrushStroke {
         Self::from_penpath(path, style)
     }
 
-    /// New from pen path.
+    /// Construct from the given pen path and style.
     pub fn from_penpath(path: PenPath, style: Style) -> Self {
         let mut new_brushstroke = Self {
             path,
@@ -242,18 +278,14 @@ impl BrushStroke {
         self.path.extend(segments);
     }
 
-    pub fn update_geometry(&mut self) {
-        self.hitboxes = self.gen_hitboxes();
-    }
-
-    /// Replacing the current path with a new one. the new path must not be empty.
+    /// Replace the current path with the given new one. the new path must not be empty.
     pub fn replace_path(&mut self, path: PenPath) {
         self.path = path;
         self.update_geometry();
     }
 
     // internal method generating the current hitboxes.
-    fn gen_hitboxes(&self) -> Vec<Aabb> {
+    fn gen_hitboxes_int(&self) -> Vec<Aabb> {
         let stroke_width = self.style.stroke_width();
 
         self.path

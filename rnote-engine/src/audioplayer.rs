@@ -1,38 +1,54 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::path::PathBuf;
-use std::time::{self, Duration};
-
+// Imports
 use anyhow::Context;
 use rand::Rng;
 use rnote_compose::penevents::KeyboardKey;
 use rodio::source::Buffered;
 use rodio::{Decoder, Source};
+use std::collections::HashMap;
+use std::fs::File;
+use std::path::PathBuf;
+use std::time::Duration;
 
-/// The audio player for pen sounds
-#[allow(missing_debug_implementations, dead_code)]
+/// The audio player for pen sounds.
 pub struct AudioPlayer {
-    // we need to hold the output streams
+    // we need to hold the output streams, even if they are not used.
+    #[allow(unused)]
     marker_outputstream: rodio::OutputStream,
     marker_outputstream_handle: rodio::OutputStreamHandle,
+    #[allow(unused)]
     brush_outputstream: rodio::OutputStream,
     brush_outputstream_handle: rodio::OutputStreamHandle,
+    #[allow(unused)]
     typewriter_outputstream: rodio::OutputStream,
     typewriter_outputstream_handle: rodio::OutputStreamHandle,
 
     sounds: HashMap<String, Buffered<Decoder<File>>>,
+    brush_sound_task_handle: Option<crate::tasks::OneOffTaskHandle>,
+}
 
-    brush_sink: Option<rodio::Sink>,
+impl std::fmt::Debug for AudioPlayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioPlayer")
+            .field("marker_outputstream", &"{.. no debug impl ..}")
+            .field("marker_outputstream_handle", &"{.. no debug impl ..}")
+            .field("brush_outputstream", &"{.. no debug impl ..}")
+            .field("brush_outputstream_handle", &"{.. no debug impl ..}")
+            .field("typewriter_outputstream", &"{.. no debug impl ..}")
+            .field("typewriter_outputstream_handle", &"{.. no debug impl ..}")
+            .field("sounds", &"{.. no debug impl ..}")
+            .field("brush_sound_task_handle", &self.brush_sound_task_handle)
+            .finish()
+    }
 }
 
 impl AudioPlayer {
-    pub const PLAY_TIMEOUT_TIME: time::Duration = time::Duration::from_millis(500);
+    pub const BRUSH_SOUND_TIMEOUT: Duration = Duration::from_millis(600);
     pub const N_SOUND_FILES_MARKER: usize = 15;
     pub const N_SOUND_FILES_TYPEWRITER: usize = 30;
-    pub const SOUND_FILE_BRUSH_SEEK_TIMES_SEC: [f64; 5] = [0.0, 0.91, 4.129, 6.0, 8.56];
+    pub const SOUND_FILE_BRUSH_SEEK_TIMES_MS: [f64; 5] = [0., 910., 4129., 6000., 8560.];
 
-    /// create and initialize new audioplayer.
-    /// pkg_data_dir is the app data directory which has a "sounds" subfolder containing the sound files
+    /// Create and initialize new audioplayer.
+    /// `pkg_data_dir` is the app data directory which has a "sounds" subfolder containing the sound files
     pub fn new_init(mut pkg_data_dir: PathBuf) -> Result<Self, anyhow::Error> {
         pkg_data_dir.push("sounds/");
 
@@ -100,8 +116,7 @@ impl AudioPlayer {
             typewriter_outputstream_handle,
 
             sounds,
-
-            brush_sink: None,
+            brush_sound_task_handle: None,
         })
     }
 
@@ -121,40 +136,59 @@ impl AudioPlayer {
         }
     }
 
-    pub fn start_random_brush_sound(&mut self) {
+    pub fn trigger_random_brush_sound(&mut self) {
         let mut rng = rand::thread_rng();
         let brush_sound_seek_time_index =
-            rng.gen_range(0..Self::SOUND_FILE_BRUSH_SEEK_TIMES_SEC.len());
+            rng.gen_range(0..Self::SOUND_FILE_BRUSH_SEEK_TIMES_MS.len());
 
-        match rodio::Sink::try_new(&self.brush_outputstream_handle) {
-            Ok(sink) => {
-                sink.append(
-                    self.sounds["brush"]
-                        .clone()
-                        .repeat_infinite()
-                        .skip_duration(Duration::from_millis(
-                            (Self::SOUND_FILE_BRUSH_SEEK_TIMES_SEC[brush_sound_seek_time_index]
-                                * 1000.0)
-                                .round() as u64,
-                        )),
-                );
+        let mut reinstall_task = false;
 
-                self.brush_sink = Some(sink);
+        if let Some(handle) = self.brush_sound_task_handle.as_mut() {
+            if !handle.timeout_reached() {
+                if let Err(e) = handle.reset_timeout() {
+                    log::error!("resetting timeout on brush sound stop task failed, {e:?}");
+                    reinstall_task = true;
+                }
+            } else {
+                reinstall_task = true;
             }
-            Err(e) => log::error!(
-                "failed to create sink in start_play_random_brush_sound(), Err {:?}",
-                e
-            ),
+        } else {
+            reinstall_task = true;
+        }
+
+        if reinstall_task {
+            let sink = match rodio::Sink::try_new(&self.brush_outputstream_handle) {
+                Ok(sink) => sink,
+                Err(e) => {
+                    log::error!(
+                        "failed to create sink in start_play_random_brush_sound(), Err {:?}",
+                        e
+                    );
+                    self.brush_sound_task_handle = None;
+                    return;
+                }
+            };
+
+            sink.append(
+                self.sounds["brush"]
+                    .clone()
+                    .repeat_infinite()
+                    .skip_duration(Duration::from_millis(
+                        (Self::SOUND_FILE_BRUSH_SEEK_TIMES_MS[brush_sound_seek_time_index]).round()
+                            as u64,
+                    )),
+            );
+
+            self.brush_sound_task_handle = Some(crate::tasks::OneOffTaskHandle::new(
+                move || {
+                    sink.stop();
+                },
+                Self::BRUSH_SOUND_TIMEOUT,
+            ));
         }
     }
 
-    pub fn stop_random_brush_sond(&mut self) {
-        if let Some(brush_sink) = self.brush_sink.take() {
-            brush_sink.stop();
-        }
-    }
-
-    /// Play a typewriter sound that fits the given key type, or a generic sound when None
+    /// Play a typewriter sound that fits the given key type, or a generic sound when None.
     pub fn play_typewriter_key_sound(&self, keyboard_key: Option<KeyboardKey>) {
         match rodio::Sink::try_new(&self.typewriter_outputstream_handle) {
             Ok(sink) => match keyboard_key {

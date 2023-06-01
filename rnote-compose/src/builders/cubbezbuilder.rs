@@ -1,18 +1,16 @@
-use std::time::Instant;
-
-use p2d::bounding_volume::{Aabb, BoundingVolume};
-
+// Impoorts
+use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
+use super::ShapeBuilderBehaviour;
+use crate::constraints::ConstraintRatio;
 use crate::helpers::AabbHelpers;
 use crate::penevents::{PenEvent, PenState};
 use crate::penpath::Element;
 use crate::shapes::CubicBezier;
 use crate::style::{indicators, Composer};
-use crate::{Shape, Style};
-
-use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
-use super::ShapeBuilderBehaviour;
-use crate::constraints::ConstraintRatio;
 use crate::Constraints;
+use crate::{Shape, Style};
+use p2d::bounding_volume::{Aabb, BoundingVolume};
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 enum CubBezBuilderState {
@@ -43,9 +41,8 @@ enum CubBezBuilderState {
 }
 
 #[derive(Debug, Clone)]
-/// cubic bezier builder
+/// Cubic bezier builder.
 pub struct CubBezBuilder {
-    /// the state
     state: CubBezBuilderState,
 }
 
@@ -67,8 +64,6 @@ impl ShapeBuilderBehaviour for CubBezBuilder {
         _now: Instant,
         mut constraints: Constraints,
     ) -> ShapeBuilderProgress {
-        //log::debug!("state: {:?}, event: {:?}", &self.state, &event);
-
         // we always want to allow horizontal and vertical constraints while building a cubbez
         constraints.ratios.insert(ConstraintRatio::Horizontal);
         constraints.ratios.insert(ConstraintRatio::Vertical);
@@ -146,13 +141,13 @@ impl ShapeBuilderBehaviour for CubBezBuilder {
         match &self.state {
             CubBezBuilderState::Cp1 { start, cp1 }
             | CubBezBuilderState::Cp1Finished { start, cp1 } => Some(
-                Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*cp1))
+                Aabb::new_positive((*start).into(), (*cp1).into())
                     .loosened(stroke_width.max(indicators::POS_INDICATOR_RADIUS) / zoom),
             ),
             CubBezBuilderState::Cp2 { start, cp1, cp2 }
             | CubBezBuilderState::Cp2Finished { start, cp1, cp2 } => {
-                let mut aabb = Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*cp2));
-                aabb.take_point(na::Point2::from(*cp1));
+                let mut aabb = Aabb::new_positive((*start).into(), (*cp2).into());
+                aabb.take_point((*cp1).into());
 
                 Some(aabb.loosened(stroke_width.max(indicators::POS_INDICATOR_RADIUS) / zoom))
             }
@@ -162,9 +157,9 @@ impl ShapeBuilderBehaviour for CubBezBuilder {
                 cp2,
                 end,
             } => {
-                let mut aabb = Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*end));
-                aabb.take_point(na::Point2::from(*cp1));
-                aabb.take_point(na::Point2::from(*cp2));
+                let mut aabb = Aabb::new_positive((*start).into(), (*end).into());
+                aabb.take_point((*cp1).into());
+                aabb.take_point((*cp2).into());
 
                 Some(aabb.loosened(stroke_width.max(indicators::POS_INDICATOR_RADIUS) / zoom))
             }

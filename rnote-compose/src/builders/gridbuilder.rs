@@ -1,18 +1,16 @@
-use std::time::Instant;
-
-use p2d::bounding_volume::{Aabb, BoundingVolume};
-use piet::RenderContext;
-
+// Imports
+use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
+use super::ShapeBuilderBehaviour;
 use crate::helpers::AabbHelpers;
 use crate::penevents::{PenEvent, PenState};
 use crate::penpath::Element;
 use crate::shapes::{Line, Rectangle};
 use crate::style::{indicators, Composer};
-use crate::{Shape, Style};
-
-use super::shapebuilderbehaviour::{ShapeBuilderCreator, ShapeBuilderProgress};
-use super::ShapeBuilderBehaviour;
 use crate::Constraints;
+use crate::{Shape, Style};
+use p2d::bounding_volume::{Aabb, BoundingVolume};
+use piet::RenderContext;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 enum GridBuilderState {
@@ -55,8 +53,6 @@ impl ShapeBuilderBehaviour for GridBuilder {
         _now: Instant,
         constraints: Constraints,
     ) -> ShapeBuilderProgress {
-        //log::debug!("state: {:?}, event: {:?}", &self.state, &event);
-
         match (&mut self.state, event) {
             (GridBuilderState::FirstCell { start, current }, PenEvent::Down { element, .. }) => {
                 *current = constraints.constrain(element.pos - *start) + *start;
@@ -108,10 +104,9 @@ impl ShapeBuilderBehaviour for GridBuilder {
         match &self.state {
             GridBuilderState::FirstCell { start, current }
             | GridBuilderState::FirstCellFinished { start, current }
-            | GridBuilderState::Grids { start, current, .. } => Some(
-                Aabb::new_positive(na::Point2::from(*start), na::Point2::from(*current))
-                    .loosened(bounds_margin),
-            ),
+            | GridBuilderState::Grids { start, current, .. } => {
+                Some(Aabb::new_positive((*start).into(), (*current).into()).loosened(bounds_margin))
+            }
         }
     }
 
