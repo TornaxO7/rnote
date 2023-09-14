@@ -48,8 +48,8 @@ modules:
           - "-DENABLE_LIBOPENJPEG=none"
       sources:
           - type: archive
-            url: "https://poppler.freedesktop.org/poppler-23.04.0.tar.xz"
-            sha256: b6d893dc7dcd4138b9e9df59a13c59695e50e80dc5c2cacee0674670693951a1
+            url: "https://poppler.freedesktop.org/poppler-23.08.0.tar.xz"
+            sha256: 4a4bf7fc903b9f1a2ab7d04b7c5d8220db9bc6261cc73fdb9a826dc272f49aa8
     - name: poppler-data
       buildsystem: cmake-ninja
       config-opts:
@@ -58,6 +58,12 @@ modules:
           - type: archive
             url: "https://poppler.freedesktop.org/poppler-data-0.4.12.tar.gz"
             sha256: c835b640a40ce357e1b83666aabd95edffa24ddddd49b8daff63adb851cdab74
+    - name: cairo
+      buildsystem: meson
+      sources:
+          - type: git
+            url: https://gitlab.freedesktop.org/cairo/cairo.git
+            commit: 7380d3dd7d5128db20f0be063b086519ed555327
     - name: rnote
       buildsystem: meson
       run-tests: true
